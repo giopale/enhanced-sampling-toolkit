@@ -16,6 +16,7 @@ from estk.grid import Grid, Limits, resolve_limits
 from estk.io.colvar import CVTable
 from estk.logging import get_logger
 from estk.reweight.bandwidth import effective_sample_size, silverman
+from estk.reweight.combine import combine as combine_surfaces
 from estk.reweight.kde import kde_on_grid
 from estk.surface import Surface
 
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 DEFAULT_POINTS = 100
+COMBINED_NAME = "combined.dat"
 
 
 def log_weights(bias: np.ndarray, kbt: float) -> np.ndarray:
@@ -112,21 +114,30 @@ def reweight_table(
         "bandwidth": {n: float(b) for n, b in zip(cvs, bandwidths, strict=True)},
         "bandwidth_source": bw_sources,
         "log_weight_total": log_total,
+        "log_weight_max": float(raw.max()),
         "walls_in_bias": table.report.walls_in_bias,
     }
     meta.update(metadata or {})
 
+    free_energy = -table.kbt * log_p
+    finite = np.isfinite(free_energy)
+    if not finite.any():
+        raise EstError(f"{table.run_name}: no frames inside the grid")
+    offset = float(free_energy[finite].min())
+    meta["fes_offset"] = offset
+    meta["energy_units"] = table.energy_units
     if quantity is None:
-        free_energy = -table.kbt * log_p
-        finite = np.isfinite(free_energy)
-        if not finite.any():
-            raise EstError(f"{table.run_name}: no frames inside the grid")
-        offset = float(free_energy[finite].min())
-        meta["fes_offset"] = offset
         return Surface(
             grid=grid, values=free_energy - offset, units=table.energy_units, metadata=meta
         )
-    return Surface(grid=grid, values=averages[quantity], quantity=quantity, units="", metadata=meta)
+    return Surface(
+        grid=grid,
+        values=averages[quantity],
+        quantity=quantity,
+        units="",
+        metadata=meta,
+        fes=free_energy - offset,
+    )
 
 
 @dataclass
@@ -138,11 +149,15 @@ class ReweightResult:
     limit_sources: dict[str, tuple[str, str]] = field(default_factory=dict)
     failed: dict[str, str] = field(default_factory=dict)
     tables: dict[str, CVTable] = field(default_factory=dict)
+    combined: Surface | None = None
 
     def save(self, folder: Path | str) -> list[Path]:
-        """Write ``<folder>/<run>.dat`` for each run."""
+        """Write ``<folder>/<run>.dat`` for each run and ``<folder>/combined.dat``."""
         folder = Path(folder)
-        return [s.save(folder / f"{name}.dat") for name, s in self.surfaces.items()]
+        paths = [s.save(folder / f"{name}.dat") for name, s in self.surfaces.items()]
+        if self.combined is not None:
+            paths.append(self.combined.save(folder / COMBINED_NAME))
+        return paths
 
 
 def reweight(
@@ -158,8 +173,9 @@ def reweight(
     include_walls: bool = False,
     jobs: int = 1,
     skip_failed: bool = False,
+    combine: str | None = "probability",
 ) -> ReweightResult:
-    """Reweight every run of ``project`` onto one grid.
+    """Reweight every run of ``project`` onto one grid, and combine the runs.
 
     Parameters
     ----------
@@ -182,6 +198,9 @@ def reweight(
         Runs computed in parallel.
     skip_failed:
         Leave out runs that fail (they are listed in ``failed``) instead of stopping.
+    combine:
+        How to combine the runs into ``result.combined`` (see ``estk.reweight.combine``):
+        ``"probability"``, ``"equal"``, ``"legacy"``, or None for no combination.
     """
     cvs = list(cvs)
     if not cvs:
@@ -266,12 +285,14 @@ def reweight(
             raise error
     if not surfaces:
         raise EstError("reweighting failed for every run")
+    combined = combine_surfaces(surfaces, mode=combine) if combine else None
     return ReweightResult(
         grid=grid,
         surfaces=surfaces,
         limit_sources=limit_sources,
         failed=failed,
         tables=tables,
+        combined=combined,
     )
 
 

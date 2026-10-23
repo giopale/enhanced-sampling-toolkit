@@ -149,3 +149,27 @@ def test_reweight_bad_options(workdir):
     result = run("reweight", "d0", "cn", "--points", "ten")
     assert result.exit_code == 1
     assert "--points" in result.output
+
+
+def test_reweight_combines_and_combine_command(workdir):
+    make_run(workdir / "000")
+    make_run(workdir / "001")
+    (workdir / "estk.yaml").write_text("runs:\n  pattern: '0*'\n")
+    result = run("reweight", "d0", "cn", "--points", "6,5")
+    assert result.exit_code == 0, result.output
+    assert "runs combined with mode 'probability'" in result.output
+    from estk.surface import Surface
+
+    combined = Surface.load(workdir / "reweight-d0-cn" / "combined.dat")
+    assert combined.metadata["combined"] == "probability"
+
+    files = [str(p) for p in sorted((workdir / "reweight-d0-cn").glob("*.dat"))]
+    result = run("combine", *files, "--mode", "equal", "-o", "equal.dat")
+    assert result.exit_code == 0, result.output
+    assert Surface.load(workdir / "equal.dat").metadata["run_weights"] == {"000": 0.5, "001": 0.5}
+    assert run("combine", *files, "-o", "equal.dat").exit_code == 1  # exists
+    assert "unknown mode" in run("reweight", "d0", "cn", "--combine", "mean").output
+
+    result = run("reweight", "d0", "cn", "--points", "6,5", "--combine", "none", "-o", "nocomb")
+    assert result.exit_code == 0, result.output
+    assert not (workdir / "nocomb" / "combined.dat").exists()

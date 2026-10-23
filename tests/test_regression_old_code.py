@@ -61,3 +61,32 @@ def test_free_energy_matches_old_code(project, old_path):
     assert np.array_equal(finite, np.isfinite(new.values))
     np.testing.assert_allclose(new.values[finite], old_values[finite], atol=2e-5, rtol=1e-7)
     assert new.metadata["fes_offset"] == pytest.approx(np.min(old.values[finite]), abs=2e-5)
+
+
+old_averages = sorted(RUNS.glob("*-rew-fes-AVG.dat")) if RUNS.is_dir() else []
+
+
+@pytest.mark.skipif(not old_averages, reason="no old -AVG.dat file in tests/data/runs")
+@pytest.mark.parametrize("old_path", old_averages, ids=lambda p: p.name)
+def test_legacy_combination_matches_old_average(project, old_path):
+    old = Surface.load(old_path)
+    cvs = list(old.grid.names)
+    result = project.reweight(cvs, points=old.grid.points, combine="legacy")
+    new = result.combined
+
+    # Run weights: the old code printed exp(log_weight_total) shares, with its
+    # log_weight_total = log sum exp((V - V_max)/kT) written in each pot*.dat header.
+    old_lwt = {
+        p.parent.name: Surface.load(p).metadata["log_weight_total"]
+        for p in RUNS.glob(f"*/pot*-{cvs[0]}-{cvs[1]}-rew-fes.dat")
+    }
+    total = sum(np.exp(v) for v in old_lwt.values())
+    for run, value in old_lwt.items():
+        assert new.metadata["run_weights"][run] == pytest.approx(np.exp(value) / total, rel=1e-6)
+
+    finite = np.isfinite(old.values)
+    assert np.array_equal(finite, np.isfinite(new.values))
+    np.testing.assert_allclose(new.values[finite], old.values[finite], atol=2e-5, rtol=1e-7)
+    both = np.isfinite(old.error) & np.isfinite(new.error)
+    assert np.array_equal(np.isfinite(old.error), np.isfinite(new.error))
+    np.testing.assert_allclose(new.error[both], old.error[both], atol=2e-5, rtol=1e-6)

@@ -23,6 +23,10 @@ class Surface:
 
     ``metadata`` records how the surface was made (run, temperature, bandwidths, time window,
     ...); it is written to and read from the file header.
+
+    A property surface also carries ``fes``, the free energy on the same grid (shifted like a
+    free-energy surface, same ``fes_offset`` convention): combining runs needs the density to
+    weight each run's average point by point.
     """
 
     grid: Grid
@@ -31,13 +35,16 @@ class Surface:
     units: str = "kj/mol"
     error: np.ndarray | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    fes: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         self.values = np.asarray(self.values, dtype=float)
         if self.values.shape != self.grid.shape:
             raise ValueError(f"values have shape {self.values.shape}, grid {self.grid.shape}")
-        if self.error is not None and np.shape(self.error) != self.grid.shape:
-            raise ValueError("error must have the same shape as values")
+        for name in ("error", "fes"):
+            extra = getattr(self, name)
+            if extra is not None and np.shape(extra) != self.grid.shape:
+                raise ValueError(f"{name} must have the same shape as values")
 
     @property
     def is_fes(self) -> bool:

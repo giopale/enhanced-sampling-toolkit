@@ -137,7 +137,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 4 | [Run discovery and simulation metadata](#4-run-discovery-and-simulation-metadata) | done |
 | 5 | [CV data loading](#5-cv-data-loading) | done |
 | 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | done |
-| 7 | [Combining runs](#7-combining-runs) | todo |
+| 7 | [Combining runs](#7-combining-runs) | done |
 | 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
 | 9 | [Surface file format](#9-surface-file-format) | in progress |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | todo |
@@ -484,7 +484,36 @@ Notes on what was built:
 
 ## 7. Combining runs
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/reweight/combine.py` (`combine(surfaces, mode=...)`),
+`ReweightResult.combined`, `estk reweight ... [--combine probability|equal|legacy|none]` (writes
+`<DIR>/combined.dat` next to the per-run files) and `estk combine FILES... [-m MODE] [-o FILE]` to
+recombine saved per-run files without reweighting again. Tested in `tests/test_combine.py` and
+`tests/test_regression_old_code.py`.
+
+**Decided:** the corrected weighting (`probability`) is the default.
+
+Notes on what was built:
+- `probability`: runs are summed as densities, each with weight sum exp(V/kT) computed without
+  subtracting the run's maximum. Tested to give exactly the surface of reweighting all frames
+  of all runs together (for free energies and property averages), including runs whose biases
+  differ by a constant. Kernels are normalised per run, so runs with different bandwidths
+  (e.g. Silverman per run) combine correctly (tested against a brute-force sum).
+- `equal`: the runs' normalised densities are averaged; bias offsets between runs don't matter.
+- `legacy`: reproduces the old `-AVG.dat` exactly (values, run weights, error column; tested
+  on the real reference data). Its values are not shifted to minimum 0, as in the old files.
+- The error column (`fes.err`, `<q>.err`) is the spread of the runs around the combined value,
+  weighted like the combination; NaN where fewer than two runs have data. (The old reader's
+  shift of the error column is not reproduced.)
+- Property surfaces carry their free energy (`fes` column), so that runs can be weighted by
+  their density at each grid point, also when combining saved files.
+- On the 4 real test runs, `probability` and `legacy` give run weights 0.26/0.20/0.05/0.49 vs
+  0.26/0.27/0.06/0.41 and surfaces that differ by 0.5 kT rms in the region below 5 kT; the
+  spread between the runs themselves is 0.6 kT there.
+- Caveat to keep in mind: `probability` trusts that the bias offsets of independent runs are
+  comparable (as OPES's normalisation intends). If one run dominates the weights, compare with
+  `--combine equal`.
 
 ### Current state
 - `reweight_property.run` reads all per-run files back from disk, weights each run by

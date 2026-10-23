@@ -2,7 +2,8 @@
 
 Format written by estk::
 
-    #! FIELDS d0 cn fes [fes.err]
+    #! FIELDS d0 cn fes [fes.err]          (free energy)
+    #! FIELDS d0 cn q [q.err] fes           (property average, with the free energy)
     #! SET min_d0 1.5
     #! SET max_d0 2.5
     #! SET num_grid_points_d0 100
@@ -36,6 +37,8 @@ def write_surface(surface: Surface, path: Path) -> Path:
     fields = [*grid.names, surface.quantity]
     if surface.error is not None:
         fields.append(f"{surface.quantity}.err")
+    if surface.fes is not None and not surface.is_fes:
+        fields.append("fes")
     header = [f"#! FIELDS {' '.join(fields)}"]
     for name, lo, hi, n in zip(grid.names, grid.lower, grid.upper, grid.points, strict=True):
         header += [
@@ -53,6 +56,8 @@ def write_surface(surface: Surface, path: Path) -> Path:
     columns.append(surface.values.reshape(-1, order="F"))
     if surface.error is not None:
         columns.append(np.asarray(surface.error).reshape(-1, order="F"))
+    if surface.fes is not None and not surface.is_fes:
+        columns.append(np.asarray(surface.fes).reshape(-1, order="F"))
     data = np.column_stack(columns)
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,10 +113,16 @@ def read_surface(path: Path) -> Surface:
     fill = np.inf if quantity == "fes" else np.nan
     values = np.full(points, fill)
     values[index] = data[:, ndim]
-    error = None
-    if data.shape[1] > ndim + 1:
-        error = np.full(points, np.nan)
-        error[index] = data[:, ndim + 1]
+    # Further columns: the free energy of a property surface ("fes"), otherwise the error
+    # (estk writes "<quantity>.err", the old -AVG files "stddev(fes)").
+    error = fes = None
+    for j in range(ndim + 1, min(data.shape[1], len(fields))):
+        column = np.full(points, np.inf if fields[j] == "fes" else np.nan)
+        column[index] = data[:, j]
+        if fields[j] == "fes" and quantity != "fes":
+            fes = column
+        elif error is None:
+            error = column
 
     metadata: dict[str, Any] = {}
     units = "kj/mol"
@@ -125,7 +136,13 @@ def read_surface(path: Path) -> Surface:
         elif not key.startswith(("min_", "max_", "num_grid_points_", "nbins_", "periodic_")):
             metadata[key] = _number_or_text(raw)
     return Surface(
-        grid=grid, values=values, quantity=quantity, units=units, error=error, metadata=metadata
+        grid=grid,
+        values=values,
+        quantity=quantity,
+        units=units,
+        error=error,
+        metadata=metadata,
+        fes=fes,
     )
 
 

@@ -208,6 +208,13 @@ def reweight(
     skip_failed: Annotated[
         bool, typer.Option("--skip-failed", help="Leave out runs that fail instead of stopping.")
     ] = False,
+    combine: Annotated[
+        str,
+        typer.Option(
+            help="Combine the runs: probability (default; = all frames together), equal "
+            "(every run counts the same), legacy (as the original scripts), none."
+        ),
+    ] = "probability",
     output: Annotated[
         Path | None,
         typer.Option(
@@ -217,10 +224,12 @@ def reweight(
 ) -> None:
     """Reweight every run to a free-energy surface (or property average) on a common grid.
 
-    Writes one file per run, <output>/<run>.dat, in PLUMED grid format.
+    Writes one file per run, <output>/<run>.dat, and the combination of all runs,
+    <output>/combined.dat, in PLUMED grid format.
     """
     from estk.project import Project
 
+    mode = _combine_mode(combine)
     project = Project(load_config(_state["config"]))
     result = project.reweight(
         names,
@@ -233,6 +242,7 @@ def reweight(
         include_walls=include_walls,
         jobs=jobs,
         skip_failed=skip_failed,
+        combine=mode,
     )
     folder = output or Path("reweight-" + "-".join([*names, *([prop] if prop else [])]))
     paths = result.save(folder)
@@ -241,7 +251,8 @@ def reweight(
     for name, lo, hi, n in zip(grid.names, grid.lower, grid.upper, grid.points, strict=True):
         src_lo, src_hi = result.limit_sources[name]
         console.print(f"grid {name}: {lo:g} ({src_lo}) to {hi:g} ({src_hi}), {n} points")
-    table = Table("run", "frames", "effective", *[f"h({n})" for n in names], "past walls")
+    weights = result.combined.metadata["run_weights"] if result.combined is not None else {}
+    table = Table("run", "frames", "effective", *[f"h({n})" for n in names], "weight", "past walls")
     for run_name, surface in result.surfaces.items():
         meta = surface.metadata
         report = result.tables[run_name].report
@@ -250,14 +261,63 @@ def reweight(
             str(meta["frames"]),
             f"{meta['effective_frames']:.0f}",
             *[f"{meta['bandwidth'][n]:.4g} ({meta['bandwidth_source'][n]})" for n in names],
+            f"{weights[run_name]:.3f}" if run_name in weights else "-",
             report.wall_summary() or "-",
         )
     console.print(table)
+    if mode:
+        console.print(f"runs combined with mode '{mode}' -> combined.dat")
     if include_walls:
         console.print("wall energies are included in the bias")
     for run_name, reason in result.failed.items():
         err_console.print(f"[yellow]skipped {run_name}:[/yellow] {reason}", highlight=False)
     console.print(f"wrote {len(paths)} file(s) to {folder}/")
+
+
+@app.command("combine")
+@handle_errors
+def combine_files(
+    files: Annotated[list[Path], typer.Argument(help="Per-run surfaces written by estk reweight.")],
+    mode: Annotated[
+        str, typer.Option("--mode", "-m", help="probability (default), equal or legacy.")
+    ] = "probability",
+    output: Annotated[Path, typer.Option("--output", "-o", help="Output file.")] = Path(
+        "combined.dat"
+    ),
+    force: Annotated[bool, typer.Option("--force", help="Overwrite the output file.")] = False,
+) -> None:
+    """Combine per-run surfaces (e.g. reweight-d0-cn/0*.dat) into one, with another mode."""
+    from estk.reweight import combine
+    from estk.surface import Surface
+
+    chosen = _combine_mode(mode)
+    if chosen is None:
+        raise EstError("--mode none makes no sense here")
+    if output.exists() and not force:
+        raise EstError(f"{output} already exists (use --force to overwrite)")
+    surfaces = {}
+    for path in files:
+        if path.name == "combined.dat":
+            continue
+        surface = Surface.load(path)
+        surfaces[str(surface.metadata.get("run", path.stem))] = surface
+    result = combine(surfaces, mode=chosen)
+    result.save(output)
+    table = Table("run", "weight")
+    for run_name, weight in result.metadata["run_weights"].items():
+        table.add_row(run_name, f"{weight:.3f}")
+    console.print(table)
+    console.print(f"wrote {output} (mode '{chosen}')")
+
+
+def _combine_mode(text: str) -> str | None:
+    from estk.reweight import COMBINE_MODES
+
+    if text.lower() == "none":
+        return None
+    if text.lower() not in COMBINE_MODES:
+        raise EstError(f"unknown mode '{text}' (choose from {', '.join(COMBINE_MODES)}, none)")
+    return text.lower()
 
 
 def _parse_points(text: str) -> int | list[int]:
