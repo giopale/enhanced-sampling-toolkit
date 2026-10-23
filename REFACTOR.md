@@ -11,6 +11,9 @@ documented toolkit. There is one section per functionality, each with:
 Update the status line of a section when work on it starts or finishes, and the
 [status overview](#status-overview) table with it.
 
+**Naming:** the pip package is `enhanced-sampling-toolkit`; the import package, the command and
+the project file are `estk` / `estk.toml`. (`est` is already taken on PyPI.)
+
 ---
 
 ## Design overview (A + C)
@@ -29,7 +32,7 @@ The toolkit becomes a **Python library first** (usable from scripts and notebook
 
    | Kind of setting | Lives in | Example |
    |---|---|---|
-   | Facts about the system | `est.toml` (project file) | CV labels, limits, bandwidths, atom types |
+   | Facts about the system | `estk.toml` (project file) | CV labels, limits, bandwidths, atom types |
    | Choices for this run | CLI flags / function arguments | which CVs, time window, number of minima |
    | Cosmetics | plot styles (`--style paper`, `.mplstyle`) | colours, font sizes, figure size |
    | Defaults | code | grid size 100×100, string method `dt` |
@@ -43,9 +46,12 @@ The toolkit becomes a **Python library first** (usable from scripts and notebook
 
 ```
 pyproject.toml
-src/est/
+src/estk/
 ├── __init__.py          # public API: Project, FreeEnergySurface, Path, ...
-├── config.py            # est.toml schema (pydantic) + loader
+├── config.py            # estk.toml schema (pydantic) + loader
+├── errors.py            # EstError and subclasses
+├── logging.py           # get_logger, CLI logging set-up
+├── migrate.py           # old Hydra case YAML -> estk.toml
 ├── project.py           # Project: run discovery + high-level methods
 ├── io/
 │   ├── lammps.py        # log.lammps parsing
@@ -73,7 +79,7 @@ src/est/
 │   ├── path.py
 │   └── diagnostics.py
 ├── cli/
-│   ├── main.py          # Typer app: `est ...`
+│   ├── main.py          # Typer app: `estk ...`
 │   └── ...              # one module per command group
 └── logging.py
 tests/
@@ -83,7 +89,7 @@ docs/
 ### User-facing shape
 
 ```toml
-# est.toml
+# estk.toml
 [runs]
 root = "."
 pattern = "00*"
@@ -107,16 +113,16 @@ type_map = { 1 = "H", 2 = "O", 3 = "Ti" }
 ```
 
 ```python
-from est import Project
-proj = Project("est.toml")
+from estk import Project
+proj = Project("estk.toml")
 fes = proj.reweight(cvs=("d0", "cn"), time=(0, 20))
 path = fes.mep(minima=2, split="vertical")
 print(path.barrier)
 ```
 
 ```bash
-est reweight --cvs d0 cn --time 0 20            # -> d0-cn.fes.h5
-est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
+estk reweight --cvs d0 cn --time 0 20            # -> d0-cn.fes.h5
+estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 ```
 
 ---
@@ -125,9 +131,9 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 
 | # | Functionality | Status |
 |---|---|---|
-| 1 | [Packaging and entry point](#1-packaging-and-entry-point) | todo |
-| 2 | [Configuration](#2-configuration) | todo |
-| 3 | [Logging and error handling](#3-logging-and-error-handling) | todo |
+| 1 | [Packaging and entry point](#1-packaging-and-entry-point) | in progress |
+| 2 | [Configuration](#2-configuration) | done |
+| 3 | [Logging and error handling](#3-logging-and-error-handling) | done |
 | 4 | [Run discovery and simulation metadata](#4-run-discovery-and-simulation-metadata) | todo |
 | 5 | [CV data loading](#5-cv-data-loading) | todo |
 | 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | todo |
@@ -148,7 +154,12 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 
 ## 1. Packaging and entry point
 
-**Status:** todo
+**Status:** in progress
+
+**Done:** `pyproject.toml` (setuptools, `src/estk/`, Python ≥ 3.10, `estk` console script, extras
+`migrate` and `dev`, ruff and pytest settings), package skeleton with `estk --version`.
+**Left:** extras `structures`/`pt` and the scientific dependencies (added with the sections that
+need them); delete the dead files and `to_refactor/` once their logic has moved.
 
 ### Current state
 - `to_refactor/fes.py` is a Hydra app. It reads `cfg._target_` (e.g. `commands.mep.run`),
@@ -167,9 +178,9 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Each command module re-implements its own startup (style, job discovery, logging banner).
 
 ### Target design
-- `pyproject.toml` with `src/est/` layout and a console script `est = est.cli.main:app`.
+- `pyproject.toml` with `src/estk/` layout and a console script `estk = estk.cli.main:app`.
 - Core dependencies: numpy, scipy, matplotlib, pydantic, typer, rich, h5py.
-- Optional extras: `est[structures]` (ase), `est[pt]` (MDAnalysis, ectoolkits).
+- Optional extras: `estk[structures]` (ase), `estk[pt]` (MDAnalysis, ectoolkits).
 - Code modules arranged as in the [package layout](#package-layout); relative imports inside the
   package.
 - Delete the dead files once their remaining useful logic has been moved (see sections 6, 13, 14).
@@ -179,7 +190,14 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 
 ## 2. Configuration
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/config.py` (schema, `find_config`, `load_config`, `explain`, template),
+`src/estk/migrate.py`, and the commands `estk init`, `estk config show|validate|migrate`.
+Tested in `tests/test_config.py`, `tests/test_migrate.py`, `tests/test_cli.py`.
+**Handled elsewhere:** `config show` lists only `estk.toml` and default values for now; values
+from CLI flags and from the simulation files are added with sections 4 and 6. Plot styles are
+part of section 12.
 
 ### Current state
 - `config/common.yaml` holds defaults. `config/command/*.yaml` only set `_target_` and a dummy
@@ -200,27 +218,34 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Hydra override syntax (`cvs.select=[d0,cn]`, `???`, `+key=`) is a hurdle for newcomers.
 
 ### Target design
-- One small, optional `est.toml` per project, validated with pydantic models in `est/config.py`:
+- One small, optional `estk.toml` per project, validated with pydantic models in `estk/config.py`:
   - `[runs]`: `root`, `pattern`
   - `[files]`: names of the LAMMPS log, PLUMED input and COLVAR files
   - `[cv.<name>]`: `label`, `units`, `limits`, `bandwidth`, `scale`, `source` (for CVs stored
-    in separate `CV-<name>` files)
-  - `[atoms]`: `type_map`, named index groups (e.g. `water_oxygens`, surface sites)
+    in separate `CV-<name>` files). TOML has no `null`, so a one-sided range is written as
+    `min = 0.75` or `max = ...`; `limits = [lo, hi]` is shorthand for both.
+  - `[atoms]`: `type_map`, named groups of 1-based atom indices (e.g. `water_oxygens`, surface
+    sites)
   - `[plot]`: default `style`
 - Every command setting becomes a CLI flag / function argument with a default in code.
-- Plot cosmetics move to bundled styles (`est/plotting/styles/*.mplstyle`) chosen with `--style`.
+- Plot cosmetics move to bundled styles (`estk/plotting/styles/*.mplstyle`) chosen with `--style`.
   A user can pass a path to their own `.mplstyle`.
-- Precedence: CLI flag > `est.toml` > value read from the simulation files > code default.
-- `est init` writes a commented `est.toml` with the CVs found in the first run's COLVAR.
-- `est config show` prints the merged, effective settings and where each value came from.
-- Migration: a one-off `est config migrate case.yaml` that converts the CV block and atom
+- Precedence: CLI flag > `estk.toml` > value read from the simulation files > code default.
+- `estk init` writes a commented `estk.toml` with the CVs found in the first run's COLVAR.
+- `estk config show` prints the merged, effective settings and where each value came from.
+- Migration: a one-off `estk config migrate case.yaml` that converts the CV block and atom
   groups of an old case file and lists the keys it dropped.
+- The config file is searched for in the current folder and its parents; `--config` selects
+  another file. Relative paths in it are resolved against the file's folder.
 
 ---
 
 ## 3. Logging and error handling
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/logging.py`, `src/estk/errors.py`, and error handling in the CLI.
+**Handled elsewhere:** `--skip-failed` is added with the multi-run reweighting (section 6).
 
 ### Current state
 - `logger_setup.py` clears the root logger's handlers at import and configures a logger named
@@ -235,7 +260,7 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Library code that calls `sys.exit()` can't be used from a notebook.
 
 ### Target design
-- `est/logging.py`: library modules use `logging.getLogger(__name__)` and never configure
+- `estk/logging.py`: library modules use `logging.getLogger(__name__)` and never configure
   handlers. The CLI installs a `rich` handler and maps `-v/-q` to log levels.
 - Custom exceptions (`EstError`, `ConfigError`, `MissingFileError`, `MissingLimitsError`) with
   clear messages. The CLI catches `EstError` and prints it without a traceback (unless `-v`).
@@ -269,16 +294,16 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Units are assumed (kJ/mol for energies, ps for PLUMED time) and not recorded.
 
 ### Target design
-- `est.io.lammps.read_log_metadata(path) -> LammpsMetadata(temperature, timestep, units)`,
+- `estk.io.lammps.read_log_metadata(path) -> LammpsMetadata(temperature, timestep, units)`,
   parsing by keyword (`temp` followed by values) rather than column number, resolving simple
   `variable` definitions, and scanning the whole file.
-- `est.io.plumed.read_input(path) -> PlumedInput` with `state_file`, `walls: dict[cv, (lo, hi)]`,
+- `estk.io.plumed.read_input(path) -> PlumedInput` with `state_file`, `walls: dict[cv, (lo, hi)]`,
   `bias_factor`, `energy_units`, `time_units`.
 - `Run` dataclass: `path`, `name` (the folder name, used as the stable identifier),
   `metadata` (temperature, kbT, timestep, bias factor, walls, units).
 - `Project.runs` discovers runs from `[runs]` and builds `Run` objects once.
-  The CLI shows a table with `est runs`.
-- Physical constants and unit conversions live in one place (`est/units.py`).
+  The CLI shows a table with `estk runs`.
+- Physical constants and unit conversions live in one place (`estk/units.py`).
 
 ---
 
@@ -307,7 +332,7 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - The time-unit assumption (ns in config, ps in COLVAR) is implicit.
 
 ### Target design
-- `est.io.colvar.load_cv_table(run, cvs, *, time=None, extra=None) -> CVTable`.
+- `estk.io.colvar.load_cv_table(run, cvs, *, time=None, extra=None) -> CVTable`.
   - `CVTable` holds `time`, `bias`, and a column per CV (a small wrapper around a structured
     array or `pandas.DataFrame`).
   - Columns come from COLVAR, `CV-<name>` files (from `cv.<name>.source` or the default naming
@@ -346,20 +371,20 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
   anyway when reading.
 
 ### Target design
-- `est.reweight.weights.log_weights(bias, kbT) -> np.ndarray` (log-space only, no `exp` until
+- `estk.reweight.weights.log_weights(bias, kbT) -> np.ndarray` (log-space only, no `exp` until
   needed).
-- `est.reweight.kde`:
+- `estk.reweight.kde`:
   - `fes(cvs: CVTable, grid: Grid, bandwidth, *, kbT) -> FreeEnergySurface`
   - `average_property(cvs, quantity, grid, bandwidth) -> PropertySurface`
   - Built on the log-sum-exp kernels from `utils_reweighting.py`, generalised to N dimensions
     with a full or diagonal bandwidth matrix. Memory is controlled by chunking over frames.
 - `Grid` object (limits + number of points per CV). Limits are resolved in this order:
-  CLI > `est.toml` > PLUMED walls > data range.
+  CLI > `estk.toml` > PLUMED walls > data range.
 - Bias column is detected from the PLUMED input (`*.bias` of the biasing action) or set with
   `--bias-column`.
 - `Project.reweight(cvs, *, property=None, time=None, grid=None, bandwidth=None)` runs each
   run in parallel and returns per-run surfaces plus the combined one (section 7).
-- CLI: `est reweight --cvs d0 cn [--property max_devi_f --source model_devi.out] [--time 0 20]
+- CLI: `estk reweight --cvs d0 cn [--property max_devi_f --source model_devi.out] [--time 0 20]
   [--grid 100 100] [--bandwidth 0.02 0.03] [-o d0-cn.fes.h5]`.
 - Port `calc_c_of_t` only if it's still needed; otherwise drop `ectoolkits_reweight.py`.
 - Validate the new code against the current outputs on one real dataset before deleting the old
@@ -388,7 +413,7 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Results go through text files and are read back instead of being kept in memory.
 
 ### Target design
-- `est.reweight.average.combine(surfaces, *, mode="probability") -> FreeEnergySurface`.
+- `estk.reweight.average.combine(surfaces, *, mode="probability") -> FreeEnergySurface`.
   - `mode="probability"`: sum unnormalised log-densities across runs (log-sum-exp), then
     convert to free energy. This is equivalent to reweighting all frames together and needs
     each run's absolute log-weight total.
@@ -422,12 +447,12 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
   the config.
 
 ### Target design
-- `est.reweight.bandwidth`:
+- `estk.reweight.bandwidth`:
   - `silverman(cvs, log_weights, *, bias_factor=1.0, weighted_std=False)`
   - `scv(cvs, log_weights, *, method="approx"|"exact", ...)`
 - `bandwidth=` accepts a number or list per CV, `"silverman"` (default) or `"scv"`.
-- `est bandwidth --cvs d0 cn [--method scv]` prints the values and can write them into
-  `est.toml` (`--save`).
+- `estk bandwidth --cvs d0 cn [--method scv]` prints the values and can write them into
+  `estk.toml` (`--save`).
 - The chosen bandwidths are stored in the output surface's metadata.
 
 ---
@@ -452,12 +477,12 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Units change between writing (kJ/mol) and reading (eV).
 
 ### Target design
-- `FreeEnergySurface` / `PropertySurface` (in `est/surface.py`) hold: `grid`, `values`,
+- `FreeEnergySurface` / `PropertySurface` (in `estk/surface.py`) hold: `grid`, `values`,
   `error`, `units`, `cvs` (names + labels), and `metadata` (temperature, bandwidths, time window,
-  runs and their weights, est version, the command that produced it).
+  runs and their weights, estk version, the command that produced it).
 - Native format: one HDF5 file (`*.fes.h5`, `*.prop.h5`, `*.mep.h5`) with datasets plus
-  metadata as attributes. `Surface.save(path)` / `est.load(path)`.
-- Export / import of the PLUMED text grid (`est export --plumed`, `est.load("fes.dat")`) so
+  metadata as attributes. `Surface.save(path)` / `estk.load(path)`.
+- Export / import of the PLUMED text grid (`estk export --plumed`, `estk.load("fes.dat")`) so
   existing files and PLUMED tools keep working.
 - Energies stored in one unit (kJ/mol), converted only for display (`--units eV`).
 
@@ -484,9 +509,9 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - The barrier isn't returned as a value; it's read off plots or files.
 
 ### Target design
-- `est.paths.string2d.String2D`: keep the algorithm, clean up the API, add tests on analytic
+- `estk.paths.string2d.String2D`: keep the algorithm, clean up the API, add tests on analytic
   surfaces (e.g. Müller–Brown).
-- `est.paths.mep`:
+- `estk.paths.mep`:
   - `find_minima(fes, n=2, *, method="basins"|"split", split=None)`. The default uses the basin
     labelling already written for `find_structures_level_set` (section 14), with the current
     split method as an option.
@@ -494,7 +519,7 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
   - `Path` holds the points, the arc length, the energy profile, and `barrier`,
     `reverse_barrier`, `saddle`.
 - `FreeEnergySurface.mep(...)` as a shortcut.
-- CLI: `est mep d0-cn.fes.h5 [--minima 2] [--start x y] [--end x y] [--via x y] [--plot]`
+- CLI: `estk mep d0-cn.fes.h5 [--minima 2] [--start x y] [--end x y] [--via x y] [--plot]`
   prints the barrier and writes `d0-cn.mep.h5`.
 
 ---
@@ -519,13 +544,13 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - The output directory must be created by hand.
 
 ### Target design
-- `est.analysis.convergence`:
+- `estk.analysis.convergence`:
   - `barrier_vs_time(project, cvs, times, **mep_kwargs) -> pandas.DataFrame`
   - `barrier_vs_bandwidth(project, cvs, cv, values, **mep_kwargs) -> pandas.DataFrame`
   - Each step is a plain call to `project.reweight(...)` and `fes.mep(...)`. Intermediate
     surfaces are kept in memory, or cached on disk with `--save-steps DIR`.
-- CLI: `est convergence time --cvs d0 cn --until 20 --step 0.5` and
-  `est convergence bandwidth --cvs d0 cn --cv d0 --range 0.001 0.5 --num 20 --log`.
+- CLI: `estk convergence time --cvs d0 cn --until 20 --step 0.5` and
+  `estk convergence bandwidth --cvs d0 cn --cv d0 --range 0.001 0.5 --num 20 --log`.
   Both write a CSV and a plot.
 - Delete the old `convergence_barrier.py`.
 
@@ -547,13 +572,13 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - The layout (rows/columns) is guessed from the number of files.
 
 ### Target design
-- `est.plotting.surface.plot_surface(surface, ax=None, *, path=None, levels=None, cmap=None,
+- `estk.plotting.surface.plot_surface(surface, ax=None, *, path=None, levels=None, cmap=None,
   vmin=None, vmax=None, points=None) -> Axes`. One surface, one axes; returns the axes so
   users can compose their own figures.
 - `plot_surfaces(surfaces, ncols=2)` for the per-run + average grid.
-- Labels come from `cv.<name>.label` in `est.toml`; the colour-bar label from the surface units.
+- Labels come from `cv.<name>.label` in `estk.toml`; the colour-bar label from the surface units.
 - Bundled styles (`paper`, `slides`, `notebook`), plus any user `.mplstyle` path.
-- CLI: `est plot surface d0-cn.fes.h5 [--path d0-cn.mep.h5] [--levels 0 0.8 0.1]
+- CLI: `estk plot surface d0-cn.fes.h5 [--path d0-cn.mep.h5] [--levels 0 0.8 0.1]
   [--style paper] [-o fes.png]`.
 
 ---
@@ -575,10 +600,10 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Most of the file is data loading and plotting configuration.
 
 ### Target design
-- `est.analysis.along_path.average_along_path(project, path, quantities) -> pandas.DataFrame`
+- `estk.analysis.along_path.average_along_path(project, path, quantities) -> pandas.DataFrame`
   using `point_kernel_weights` from section 6 at each path point, with the error between runs.
-- `est.plotting.path.plot_along_path(df, quantities, ...)`.
-- CLI: `est along-path d0-cn.mep.h5 --quantities dOOliq_min theta1 theta2 [-o cvs.png]`.
+- `estk.plotting.path.plot_along_path(df, quantities, ...)`.
+- CLI: `estk along-path d0-cn.mep.h5 --quantities dOOliq_min theta1 theta2 [-o cvs.png]`.
 - Delete `plot_cvs_along_mep.py.bak`.
 
 ---
@@ -606,18 +631,18 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - The FES grid is found by globbing `*<cv0>-<cv1>-rew-fes.dat` in each run folder.
 
 ### Target design
-- `est.io.trajectory`: one `Trajectory` interface over H5MD, LAMMPS dump (with a cached step
+- `estk.io.trajectory`: one `Trajectory` interface over H5MD, LAMMPS dump (with a cached step
   index) and XYZ, returning `ase.Atoms` for given steps. Type map from `[atoms]`.
-- `est.analysis.structures`:
+- `estk.analysis.structures`:
   - `frames_near(project, point, *, probability=0.9, max_frames=None) -> FrameSelection`
   - `frames_in_basin(project, fes, *, isovalue, point=None, sample=None, seed=None)
     -> FrameSelection`
   - `FrameSelection` lists `(run, step, time, weight)` and can `.write(path)` the structures
     (xyz/extxyz/lammps-data via ase) or `.to_csv()`.
-- Basin labelling (`label_basins`) moves to `est.paths.mep` / a shared module so the MEP minima
+- Basin labelling (`label_basins`) moves to `estk.paths.mep` / a shared module so the MEP minima
   search can use it.
-- CLI: `est structures near d0-cn.fes.h5 --point 1.99 1.33 [--probability 0.9] [--save out.xyz]`
-  and `est structures basin d0-cn.fes.h5 --isovalue 0.1 --point 2.0 1.0 [--sample 400]`.
+- CLI: `estk structures near d0-cn.fes.h5 --point 1.99 1.33 [--probability 0.9] [--save out.xyz]`
+  and `estk structures basin d0-cn.fes.h5 --isovalue 0.1 --point 2.0 1.0 [--sample 400]`.
 - Delete `find_structures_bin.py`.
 
 ---
@@ -638,12 +663,12 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Timestep is inferred from the first two COLVAR rows.
 
 ### Target design
-- `est.analysis.proton_transfer.compute(run, donor, acceptors, water, kind) -> CVTable`, with
-  index groups referenced by name from `[atoms]` in `est.toml`
+- `estk.analysis.proton_transfer.compute(run, donor, acceptors, water, kind) -> CVTable`, with
+  index groups referenced by name from `[atoms]` in `estk.toml`
   (e.g. `[atoms.groups] site_A = [311]`).
 - Output written in the `CV-<name>` format so it's picked up by section 5 automatically.
-- CLI: `est cv proton-transfer --kind direct --donor ads_O --acceptor site_A --water water_O`.
-- Optional extra (`est[pt]`), since it depends on MDAnalysis and ectoolkits.
+- CLI: `estk cv proton-transfer --kind direct --donor ads_O --acceptor site_A --water water_O`.
+- Optional extra (`estk[pt]`), since it depends on MDAnalysis and ectoolkits.
 
 ---
 
@@ -662,9 +687,9 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - Fixed layouts; the OPES column names are hard-coded.
 
 ### Target design
-- `est.plotting.diagnostics.plot_timeseries(project, columns, source="COLVAR")` as the shared
+- `estk.plotting.diagnostics.plot_timeseries(project, columns, source="COLVAR")` as the shared
   implementation, with `opes_summary(project)` and `model_deviation(project)` as presets.
-- CLI: `est check opes` and `est check model-deviation [--threshold 0.2 0.35]`; the second also
+- CLI: `estk check opes` and `estk check model-deviation [--threshold 0.2 0.35]`; the second also
   prints the fraction of frames above the thresholds.
 
 ---
@@ -679,9 +704,9 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 - `estimation_bandwidth/*.py`: see section 8.
 
 ### Target design
-- `est convert h5md-to-xyz TRAJ.h5 --frame N -o out.xyz` built on `est.io.trajectory`
+- `estk convert h5md-to-xyz TRAJ.h5 --frame N -o out.xyz` built on `estk.io.trajectory`
   (section 14), using the `[atoms]` type map and handling general cells.
-- The SCV scripts become `est bandwidth --method scv` (section 8).
+- The SCV scripts become `estk bandwidth --method scv` (section 8).
 
 ---
 
@@ -700,11 +725,11 @@ est mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
   - string method on the Müller–Brown surface (known saddle)
   - config validation errors
 - **Regression test:** a small, trimmed copy of a real run set (a few thousand frames) in
-  `tests/data/`. Compare the new `est reweight` + `est mep` with the outputs of the current code
+  `tests/data/`. Compare the new `estk reweight` + `estk mep` with the outputs of the current code
   (saved once before the old code is removed).
 - **CI:** GitHub Actions with ruff (lint + format) and pytest on supported Python versions.
-- **Docs:** README with install + a 5-minute tutorial (`est init`, `est reweight`, `est mep`,
-  `est plot surface`); `docs/` for the reweighting conventions (sections 6–8) and a page per
+- **Docs:** README with install + a 5-minute tutorial (`estk init`, `estk reweight`, `estk mep`,
+  `estk plot surface`); `docs/` for the reweighting conventions (sections 6–8) and a page per
   command; docstrings on the public API.
 
 ---
