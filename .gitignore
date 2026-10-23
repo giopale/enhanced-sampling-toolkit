@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hydra (used by the original scripts in to_refactor/): per-run records and logs
+.hydra/
+fes.log
