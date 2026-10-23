@@ -1,0 +1,429 @@
+from rich import print
+import sys, os
+import numpy as np
+from logger_setup import logger
+from pathlib import Path
+from parser import get_temperature_from_log, parse_state_wfile, parse_bias_factor, parse_colvar_header
+from parser import parse_cv_wall
+from ectoolkits_reweight import calc_FES, calc_property_surface, compute_bw_silverman, read_fes, write_fes, read_property, calc_one_FES_point_weights
+from omegaconf import ListConfig
+from utils import extract_field_map, find_job_dirs,find_files, read_colvar_in_time_interval, safe_stack_colvar, apply_mpl_style
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+import pandas as pd
+
+from utils_reweighting import compute_frame_weights, point_kernel_weights
+# def find_job_dirs(dirname, jobname):
+#     print(f"[bold blue]looking for stuff:[/bold blue] {dirname}")
+#     dd=Path(dirname)
+#     results = [p for p in dd.glob(jobname) if p.is_dir()]
+#     
+#     return results
+
+
+def run(cfg):
+    print(f"[bold green]Running program {cfg._target_.split('.')[1]}:[/bold green] {cfg.param}")
+    apply_mpl_style(cfg.mplstyle.dir,cfg.mplstyle.style)
+    ccc = cfg.get('cvs_along_mep',{})
+
+    # find directories
+    dir_md = cfg.get('dir_md','.')
+    jobdirs=find_job_dirs(dir_md, cfg.dir_job)
+
+
+    #  load selected cvs from config
+    cvs_select=list(cfg.cvs.get('select',None))
+    cvs=list(cfg.cvs.get('select',None))
+
+    # load additional cvs to visualize
+    cvs_add=cfg.cvs.get('add',None)
+    if cvs_add is not None:
+        cvs=cvs+list(cvs_add)
+
+    file_mep=find_files('./',Path(f'{cvs[0]}-{cvs[1]}-fes-AVG-MEP.dat'))[0]
+    mep=np.loadtxt(file_mep,usecols=[0,1])
+    with open(file_mep,'r') as f:
+        header=f.readline()
+
+    # the AVG-MEP file contains also all the MEP energies
+    # for the four potentials. Load them.
+    meps_dict={}
+    if 'job-0' in header:
+        column_names=header.replace('#','').split()
+        mep_all=np.loadtxt(file_mep)[:,-4:]
+        for idx, job in enumerate(column_names[-4:]):
+            meps_dict.update({job:mep_all[:,idx]})
+            
+    # loop over directories
+    files_written=[]
+    dict_results={}
+    for idx, jj in enumerate(jobdirs): 
+
+        logger.info('#'*60+f' {jj.name}')
+
+        # get job index for output
+        if 'job-00' in jj.name:
+            jj_idx=int(str(jj.name).split('-')[-1])
+        else:
+            jj_idx=idx
+
+
+        # get simulation parameters
+        temp=get_temperature_from_log(jj/cfg.file_lammps_log)
+        state_wfile=parse_state_wfile(jj/cfg.file_plumed_input)
+        bias_factor=parse_bias_factor(jj/state_wfile)
+        kbT = temp*0.0083144621 # kJ/mol
+        
+        logger.info(f'kbT is {kbT:.3g}')
+        
+
+        # init data struct
+        cvs_dict={}
+
+        # parse cvs from COLVAR 
+        colvar_fields=extract_field_map(jj/'COLVAR')
+        colvars_plumed=[str(ii) for ii in colvar_fields.keys()]
+
+        
+        msg=f'collective variables: '+ ', '.join(cvs)  
+        logger.info(msg)
+
+        # get time interval (nanoseconds)
+        timeint = cfg.get("time_interval", [0.0, np.inf])
+        # move to picoseconds
+        # in my setup PLUMED outputs picoseconds!
+        timeint = [1000 * ii if ii is not None else None for ii in timeint]
+        logger.info(f'selected time interval: {timeint}')
+    
+        # parse COLVAR
+        data = read_colvar_in_time_interval(jj/'COLVAR', timeint[0], timeint[1])
+    
+        # parse CVs not in COLVAR
+        # support for extra cvs calculated a posteriori using PLUMED-driver
+        masks = []
+        for cv_sel in cvs:
+            scale=cfg.cvs.get(cv_sel,{}).get('scale',1)
+            if cv_sel not in colvar_fields.keys():
+                # PLUMED can produce CVs with multiple components, such as z.min, opes.rct, ...
+                # my convention is to save them into a file named without componenents
+                cv_without_components = cv_sel.split('.')[0] if '.' in cv_sel else cv_sel
+                logger.info(f'cv {cv_sel} is not in COLVAR. loading file CV-{cv_without_components}')
+                # Note: time units in PLUMED-driver must match the simulation units!
+                data_new_cv = read_colvar_in_time_interval(jj/f'CV-{cv_without_components}', timeint[0], timeint[1])
+                # stack added colvars with the others
+                if scale != 1:
+                    logger.info(f'scaling CV {cv_sel} by {scale:.4g}')
+                    data_new_cv[:,1:] *=  scale #scale but leave time untouched
+                data = safe_stack_colvar(data, data_new_cv)
+                colvar_fields.update({cv_sel: np.shape(data)[-1]-1})
+                # remove nans
+                mask = ~np.isnan(data_new_cv[:, 1])
+                n_false = np.count_nonzero(~mask)
+                if not np.any(mask):
+                    logger.warning(f'nan detected in colvar {cv_sel}: {n_false} cases')
+            else:
+                mask = np.array([True]*len(data))
+            masks.append(mask)
+    
+        ###############################################
+        ###############################################
+        ###############################################
+        ###############################################
+    
+        # filter data outside some given limits
+        mask_new = np.array([True]*len(data))
+        cvs_to_filter = cfg["cvs"].get("filter", None)
+        if cvs_to_filter is not None:
+            for name, limits_filter in cvs_to_filter.items():
+                mask_new &= (data[:, colvar_fields[name]] >= limits_filter[0]) & \
+                            (data[:, colvar_fields[name]] <= limits_filter[1])
+    
+        mask_and = mask_new & masks[0] & masks[1]
+        if np.count_nonzero(mask_and) != len(data):
+            logger.info(f'filtering nan/limits, retaining {np.count_nonzero(mask_and)} structures ({np.count_nonzero(mask_and)/len(mask_and)*100:.3f}%)')
+            data = data[mask_and]
+        logger.debug('DONE data filtering')
+
+        # parse the limits of the cvs map to use for the analysis
+        for ii in cvs:
+            logger.debug(f'limits: {ii}')
+            limits = []
+            # get limits from plumed
+            for wall in ['LOWER', 'UPPER']:
+                limits.append(parse_cv_wall(file_path=jj/cfg["file_plumed_input"], cv=ii, wall=wall))
+            logger.debug(f'limits: walls done')
+            # merge with limits from config file
+            limits_cfg = cfg.get("cvs", {}).get(ii, {}).get("limits", [None, None])
+            for kk in [0, 1]:
+                if limits_cfg[kk] is not None:
+                    limits[kk] = limits_cfg[kk]
+            cvs_dict[ii] = {"limits": limits}
+            if None in limits:
+                logger.info(f'you must set limits for cv \'{ii}\'. Currently {limits}. Exiting')
+                sys.exit()
+        logger.debug('DONE parsing cvs limits')
+    
+        for key, val in cvs_dict.items():
+            logger.info(f'limits for CV {key} set to {val["limits"]}')
+    
+        # store the data of the selected CVs
+        for idx_cv, ii in enumerate(cvs):
+            cvs_dict[ii]["data"] = data[:, colvar_fields[ii]]
+        
+        # parse opes bias
+        bias=data[:, colvar_fields['opes.bias']]
+
+        # compute bandwidths
+        sigmas = cfg.get("sigma", [None]*len(cvs))
+        weights = compute_frame_weights(bias, kbT, normalize=True)
+    
+        matrix_kernel = np.zeros((2,2))
+        for idx_cv, ii in enumerate(cvs_select):
+            sig = cfg.get('cvs',{}).get(ii,{}).get('sigma',None)
+    
+            msg = '(specified from config)'
+            if sig is None:
+                msg='(silverman)'
+                bw = compute_bw_silverman(cvs_dict[ii]["data"], dim=2,
+                                      weights=weights, bias_factor=bias_factor)
+            else:
+                bw = sig
+            logger.info(f'bandwidth for \'{ii}\' is {bw:.5f} {msg}')
+            matrix_kernel[idx_cv,idx_cv]  = bw**2
+
+        # calculate values of additional cvs over MEP
+        options = {
+                'cv_x':cvs_dict[cvs[0]]['data'],
+                'cv_y':cvs_dict[cvs[1]]['data'],
+                'logw': np.log(weights),
+                'H': matrix_kernel,
+                'xg': None,
+                'yg': None,
+                'use_H_inv': False,
+                'frame_chunk': 200_000,
+                'return_log': False,
+                }
+        
+        dict_values={}
+   
+        for cv in cvs[2:]: 
+            # for each meo point point on the [cvs[0],cvs[1]] fes space
+            values=np.zeros(len(mep))
+            for idx, point in enumerate(mep):
+                options['xg']=point[0] 
+                options['yg']=point[1] 
+             
+                weights_on_fes, _ = point_kernel_weights(**options)
+
+                # calculate the average value of the additional cv
+                values[idx]=np.average(cvs_dict[cv]['data'],weights=weights_on_fes)
+                dict_values.update({cv:values})
+    
+        dict_results.update({str(jj):dict_values})
+
+    # calculate averages
+    
+    data=np.zeros((len(jobdirs),len(mep),len(cvs[2:])))
+    
+    for ll, (key, jobdata) in enumerate(dict_results.items()):
+        for kk, val in enumerate(jobdata.values()):
+            data[ll,:,kk]=val
+    
+    data_avg=np.mean(data, axis=0)
+    data_min=np.min(data, axis=0)
+    data_max=np.max(data,axis=0)
+    data_std=np.std(data,axis=0)
+
+    cvs_map = {cc: idx for idx, cc in enumerate(cvs[2:])}
+  
+    file_loc=Path('localization.csv')
+    add_loc=1 if file_loc.is_file() else 0
+    row=(len(cvs_add) if cvs_add is not None else 0)+1+add_loc
+    col=1
+
+    pp=cfg.get('surface_data',{}).get('fes',{}).plot 
+    fontsize=pp.get('fontsize',10)
+    plt.rcParams.update({
+        "axes.labelsize": fontsize,     # x/y/z axis labels
+        "xtick.labelsize": .8*fontsize,    # x tick labels
+        "ytick.labelsize": .8*fontsize,    # y tick labels
+    })
+
+    scale=pp.get('scale',1)
+    size=cfg.get('size',[4,3.5])
+    hspace=pp.get('hspace', 0.3)
+
+    logger.info('starting matplotlib')
+
+    fig = plt.figure(figsize=(size[0]*scale*col, size[1]*scale*row), dpi=400)
+    fig.subplots_adjust(hspace=hspace)
+    gs = fig.add_gridspec(row,col)
+
+    mep_fes=np.loadtxt(file_mep)
+    print('cv_x',mep_fes[:,0])
+    print('cv_y',mep_fes[:,1])
+    print('fes',mep_fes[:,2])
+    with open (file_mep,'r') as f:
+        header=f.readline()
+    column_names=[str(ii) for ii in header.replace('#','').replace(' ','').strip().split(',')]
+    field_map={name:index for index,name in enumerate(column_names)}
+
+    # filter the mep points using cvs
+    selection=ccc.get('select_by_coordinate',None)
+    if selection is not None:
+        for key, val in selection.items():
+            limits_selection=[-np.inf, np.inf]
+            if val[0] is not None:
+                limits_selection[0] = val[0]
+            if val[1] is not None:
+                limits_selection[1] = val[1]
+        mask=(mep_fes[:,field_map[key]] >= limits_selection[0]) & (mep_fes[:,field_map[key]] <= limits_selection[1])
+    else:
+        mask=np.ones(len(mep_fes), dtype=bool)
+
+
+    # plot the free energy along the mep
+    xx_type=ccc.get('plot',{}).get('xaxis','linear')
+    if 'linear' in xx_type:
+        xx0=np.linspace(0,1,len(mep_fes))
+        xlabel='reaction coordinate'
+    elif 'cn' in xx_type:
+        xx0=mep_fes[:,1]
+        xlabel='coordination number'
+
+    mep_fes=mep_fes[mask]
+    xx=xx0[mask]
+    axes=[]
+    # MEP
+    logger.info('plotting mep')
+    ax  = fig.add_subplot(gs[0])
+    ax.set_ylabel('energy (eV)')
+    ax.plot(xx,mep_fes[:,2],color='tab:green',label='mep',ls='-')
+    ax.fill_between(xx,mep_fes[:,3],mep_fes[:,4],color='tab:green',alpha=0.1)
+    for tt,job in enumerate(meps_dict.keys()):
+        #ax.plot(xx,meps_dict[job][mask],color='tab:green',label=job,ls='--', lw=.2, marker=f'${tt}$', markersize=3)
+        if tt == 0:
+            ax.plot(xx,meps_dict[job][mask],color='tab:green',label=job,ls='--', lw=.2, marker=f'', markersize=3)
+        else:
+            ax.plot(xx,meps_dict[job][mask],color='tab:green',label=job,ls=':', lw=.2, marker=f'', markersize=3)
+    #ax.legend()
+    axes.append(ax)
+
+    colors=['#e91e63','#9c27b0','#3f51b5','#03a9f4','#4caf50','#ff9800','#795548',]
+    # plot the results of the electronic localization analysis along the mep
+    if file_loc.is_file():
+        logger.info('plotting weights')
+        data_loc=pd.read_csv(file_loc)
+        ax  = fig.add_subplot(gs[1],sharex=ax)
+        ax.set_ylabel('weights')
+        select=np.array(data_loc['indices'],dtype=int)
+        data_loc['localized'] = data_loc.filter(like='loc_').sum(axis=1)
+        delocalized=data_loc['deloc'].values
+        localized=data_loc['localized'].values
+        ohliquid=data_loc['loc_ohliq'].values
+        xvalues=xx0
+        keep = mask[select]  # boolean array aligned with 'delocalized'
+
+        ax.plot(xvalues[select][keep], delocalized[keep],
+                color=colors[0], label='delocalized', ls='-', marker='.')
+        ax.plot(xvalues[select][keep], localized[keep],
+                color=colors[1], label='localized', ls='-', marker='.')
+        ax.plot(xvalues[select][keep], ohliquid[keep],
+                color=colors[2], label='loc_ohliq', ls='-', marker='.')
+
+       # for idx, name in enumerate(data_loc.columns):
+       #     if idx == 0:
+       #         continue
+       #     ax.plot(xx[select],data_loc[name],color=colors[idx],label=name,ls='-',marker='.')
+        #ax.legend()
+        axes.append(ax)
+    
+    # plot the added cvs along the MEP
+    if cvs_add is not None:
+        for ii, cv in enumerate(cvs_add):
+            ppcv = ccc.get('cvs',{}).get(cv,{}).get('plot',{})
+            color=ppcv.get('color',colors[ii//len(colors)])
+            logger.info(f'plotting weights {cv}')
+            ax  = fig.add_subplot(gs[ii+1+add_loc],sharex=ax)
+            col=['r','g','b','k']
+            for gg in range(4):
+                ax.plot(xx,data[gg,:,cvs_map[cv]], ls='--',lw=.2,color=color)
+                #ax.plot(xx,data[gg, mask, cvs_map[cv]], ls='-',label=cv+f' job-00{gg:d}',color=col[gg])
+
+            
+            ax.plot(xx,data_avg[mask,cvs_map[cv]], ls='-',label=cv+' avg',color=color)
+            ax.fill_between(xx,data_min[mask,cvs_map[cv]],data_max[mask,cvs_map[cv]],alpha=0.1,color=color)
+
+            #ax.fill_between(xx,data_avg[mask,cvs_map[cv]]-data_std[mask,cvs_map[cv]],
+            #                    data_avg[mask,cvs_map[cv]]+data_std[mask,cvs_map[cv]],alpha=0.1)
+
+            pp_axhline=ppcv.get('axhline',None)
+            if pp_axhline is not None:
+                val = pp_axhline['value']
+                ax.axhline(val, **pp_axhline['kwargs'])
+
+            #if 'delta' in cv:
+            #    ax.axhline(0, color='k',lw=.3,ls='--')
+            #if 'cn' in cv:
+            #    ax.axhline(.5, color='k',lw=.3,ls='--')
+            #    ax.axhline(1.5, color='k',lw=.3,ls='--')
+
+            prop_ax = ppcv.get('prop_ax',{})
+            for key, value in prop_ax.items():
+                logger.info(f'for CV {cv} setting {key} to {val}')
+                setter = getattr(ax, f"set_{key}")
+                if isinstance(value, (list, tuple)):
+                    setter(*value)
+                else:
+                    setter(value)
+            axes.append(ax)
+
+    ax.set_xlabel(xlabel)
+    for ax in axes:
+        if 'cn' in xx_type:
+            ax.invert_xaxis()
+        lines=cfg.get('cvs_along_mep',{}).get('axvline',[])
+        if lines is not None and len(lines)>0:
+            for ll in lines:
+                ax.axvline(ll,color='k',lw=.3,ls='--')
+
+## plot lines corresponding to a certain value of cn
+#    for ax in axes:
+#        lines=cfg.get('cvs_along_mep',{}).get('axvline_cn',[])
+#        
+#        if lines is not None and len(lines)>0:
+#            for ll in lines:
+#                idx_last=np.where(mep_fes[:,1]<ll)[0][0]
+#                delta=mep_fes[idx_last-1,1]-mep_fes[idx_last,1]
+#                delta1=ll-mep_fes[idx_last,1]
+#                fraction=delta1/delta
+#                position=xx[idx_last]+fraction*(xx[idx_last-1]-xx[idx_last])
+#                #print('interpolating between', mep_fes[idx_last,1],mep_fes[idx_last-1,1], 'target is',ll,)
+#                ##print('position',position)
+#                ax.axvline(position,color='k',lw=.3,ls='--')
+#        break
+    points=cfg.get('cvs_along_mep',{}).get('points',None)
+    if points is not None:
+        for point in points:
+            axes[0].scatter(2*point/(len(mep_fes)-1),mep_fes[point,2],color='k',lw=.3,marker='h', zorder=1000)
+            
+
+    plt.tight_layout()
+
+
+    for kk in ['.png','.pdf']:
+        fname_out=Path(os.getcwd())/('cvs-along-mep'+kk)
+        plt.savefig(fname_out)
+        logger.info(f'saving file {fname_out}')
+    
+
+
+    
+
+
+
+
+
+
+    logger.info('done')

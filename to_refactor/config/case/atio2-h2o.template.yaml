@@ -1,0 +1,313 @@
+# @package _global_
+
+mplstyle:
+    dir: /users/pgiorgio/scripts/mymplstyles/mymplstyles
+    style: jcp.mplstyle
+
+size: [3.37, 1.89]
+
+
+dir_md: '.' #/capstor/scratch/cscs/pgiorgio/ai2-kit/000-work/atio2-h2o-opes/md-production/
+dir_job: 'job-00*'
+#dir_job: ['job-000', 'job-001']
+
+file_fes:  'pot*-rew-fes.dat'
+#    - job-000/fes-rew-pot000.dat
+#    - job-001/fes-rew-pot001.dat
+#    - job-002/fes-rew-pot002.dat
+#    - job-003/fes-rew-pot003.dat
+
+temp: null
+bias_factor: null 
+
+nbins: [100, 100]
+# nbins is equal to nedges -1
+#sigma: [null, null]
+
+
+file_model_devi: model_devi.out
+
+property: fes
+just_average: False
+time_interval: [null, 10] # md time interval in nanoseconds
+
+convergence_barrier:
+    time_interval: [0, 0.1]
+    #time_interval: [5, 5.3]
+    time_step: 0.01
+    fmep_external: null
+    do_reweight: True
+
+
+find_structures:
+    # 9 points on the hb.sum/cn surface, pot000, md-TiO-1 
+    #points: &struct_points [[1.1, 1.95], [2.0,1.9], [2.95,1.95], [1.0,1.0], [2.0,1.0], [2.9,1.05],[1.1,0.1],[2.0,0.1], [2.9, 0.1]] #[[2.0,1.9]]
+    # points on the dz/cn surface, pot000, md-TiO-1 
+    #                        water                                            OH                                            TS                                                    O
+    points: &struct_points [[2.0, 1.925],[1.940, 1.671],[1.917, 1.402], [1.835,1.00], [1.835, 0.8730], [1.8584,0.740], [1.8445, 0.60675], [1.8541, 0.47257], [1.8600, 0.33817], [1.84, 0.075]]
+    probability_thr: 0.80
+    max_structures: null
+
+cvs_along_mep:
+    select_by_coordinate:
+        cn: [null, null]
+    plot:
+        xaxis: 'linear' # 'linear', 'cn'
+    axvline: null #[2] # zero based
+    axvline_cn: [0.5,1.5] # zero based
+    points: null #[0,7,9,14]
+
+
+
+cvs:
+    select: null #[ 'd3', 'cn']
+    add: null
+    filter:
+        cn: [0.8,3.0]
+    cn: # cn with r0=1.3
+        limits: [0.0,null]
+    cn1: # cn with r0=1.03
+        limits: [0.0,2.5]
+    cn2: # cn with r0=1.06
+        limits: [0.0,2.5]
+    cn3: # cn with r0=1.09 
+        limits: [0.0,2.5]
+    cn4: # cn with r0=1.2
+        limits: [0.0,2.5]
+    cn-p0: # cn with n=6
+        limits: [0.0,2.5]
+    cn-p1: # cn with n=12 (=cn)
+        limits: [0.0,2.5]
+    cn-p2: # cn with n=24 (=cn)
+        limits: [0.0,2.5]
+    cn-p3: # cn with n=48 (=cn)
+        limits: [0.0,2.5]
+    d0: # Ti-O distance
+        limits: [1.5, 2.5]
+    d2: # Ti-O distance
+        limits: [1.5, 2.5]
+    dz: # z component of the Ti-O distance
+        limits: [1.5, 2.5]
+    d3.min: # min distance btw Oads and Owater(all)
+        limits: [2.0, 3.0]
+    d4: # mean distance btw Ti and Osurf(all)
+        limits: [1.9, 2.1]
+    d5: # mean distance Quo O-Ti bonds (all)
+        limits: [1.6, 2.1]
+    d6.mean: # mean distance of the H closest to Oads
+        limits: [0.8, 1.3]
+    d6.min: # min distance of the H closest to Oads
+        limits: [0.8, 1.3]
+    cnO: # number of Owat between 3 and 4 A from Oads
+        limits: [2.5, 8.0]
+    cnO1: # number of Owat between 0 and 3.5 A from Oads
+        limits: [0, 8.0]
+    direct-delta:
+        limits: &deltalimits [-1.5,1.5]
+    direct-d:
+        limits: &dlimits [2.2,3.0]
+    indirect-delta:
+        limits: *deltalimits
+    indirect-d:
+        limits: *dlimits
+# AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+    direct-delta-A:
+        limits: *deltalimits
+    direct-d-A:
+        limits: *dlimits
+    indirect-delta-A:
+        limits: *deltalimits
+    indirect-d-A:
+        limits: *dlimits
+# BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+    direct-delta-B:
+        limits: *deltalimits
+    direct-d-B:
+        limits: *dlimits
+    indirect-delta-B:
+        limits: *deltalimits
+    indirect-d-B:
+        limits: *dlimits
+# CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+    direct-delta-C:
+        limits: *deltalimits
+    direct-d-C:
+        limits: *dlimits
+    indirect-delta-C:
+        limits: *deltalimits
+    indirect-d-C:
+        limits: *dlimits
+# DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDd 
+    direct-delta-D:
+        limits: *deltalimits
+    direct-d-D:
+        limits: *dlimits
+    indirect-delta-D:
+        limits: *deltalimits
+    indirect-d-D:
+        limits: *dlimits
+    hb:
+        limits: [0,4.0]
+    cnsurf.sum:
+        limits: [0,13]
+    dOHliq.min:
+        limits: [0,5.0]
+    dOHliq.max:
+        limits: [0,5.0]
+    dOHliq.avg:
+        limits: [0,5.0]
+    dOHliq.number:
+        limits: [0,5.0]
+
+
+surface_data:
+    fes: 
+      file_data: 'pot*-rew-fes.dat'
+      mark_points:
+        points: *struct_points #[[2.0,1.9], [2.0,1.0],[1.1,0.1],[2.0,0.1]]
+      mep:
+          #midpoint: [0,2.36]
+          split: vertical  #horizontal, vertical, triple # direction of the cut
+          compute_all: True
+          load: False
+          fname_mep: null
+          fname_mep_out: null
+          maxsteps: 2000
+          traj_every: 50
+          npts: 15
+          flexible: False
+          dt: 0.01
+          print_convergence: False
+          save:
+              plot: mep.png
+             
+      plot:
+          size: [3.37, 1.89]
+          row: 2
+          col: 2
+          scale: 1.5
+          hspace: 0.3
+          fontsize: 6
+          vmin: 0.0
+          vmax: 1.5
+          levels: 15
+          colormap: ['Blues','Greens','Greys']
+          reverse_colormap: True
+          limits: [null, null, null, null]
+          xlabel: null #['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']  
+          ylabel: null #['cn(O$_{\mathrm{ad}}$-H)']
+          cbarlabel: 'energy (eV)'
+          title: null
+          suptitle: null
+          mep: True
+      save:
+          plot: ['fes.png', 'fes.pdf']
+
+    dist-TiO:
+      file_data: '*rew-dist-TiO.dat'
+      file_prop: dist-TiO
+      prop_field: d2
+      mep: True
+      plot:
+        size: [3.37, 1.89]
+        row: 2
+        col: 2
+        scale: 1.5
+        hspace: 0.3
+        vmin: null #1.0
+        vmax: null #3.0
+        levels: 15
+        #colormap: Reds
+        colormap: ['Reds','Greens','Greys']
+        reverse_colormap: True
+        limits: [null, null, null, null]
+        xlabel: ['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']
+        ylabel: ['cn(O$_{\mathrm{ad}}$-H)']
+        title: Ti-O distance
+        cbarlabel: 'distance'
+        points_of_interest: null
+        mep: True
+      save:
+        plot: ['dist-TiO.png','dist-TiO.pdf']
+ 
+
+backup:
+    read: False
+    dir: 'analysis'
+    files: ['COLVAR', 'pos-Ti', 'pos-waterox', 'dist-TiO']
+
+proton_transfer:
+    file_traj: dump.xyz
+    kind: ??? # direct, indirect, null
+    case: null
+    indices_type1: 262 # 1-based indexing here; conversion to 0-based in the program
+    indices_type2: null #311 #[313, 218]
+    indices_water: &all_water_ox [153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 263]
+    surf_sites:
+        A:
+            indices_type2: 311
+        B:
+            indices_type2: [313, 218]
+        C:
+            indices_type2: [312, 310]
+        D:
+            indices_type2: 220
+        liquid:
+            indices_type2: *all_water_ox
+
+hydroxyl_distance:
+    idx_atom_ref: 262
+    z_surface: 16.7
+    selection_method: min
+
+
+hydrogen_bonds:
+    file_traj: dump.xyz
+    sel_hydrogens: 'name H'
+    sel_donors: 'name O and prop z > 16.7 and not index 261'
+    sel_acceptors: 'index 261'
+
+
+cv-distribution:
+    select: dz
+    polaron: # this won't work
+        file_colvar: dbulk
+        axvline:
+            my_value:
+                value: 2.5
+                ls: ':'
+                color: 'b'
+                label: 'whatever'
+#       polaron=6.24 # is the sum of the three bonds. the short one is 2.01
+#        bulk=5.85
+    d2:
+        mask:
+            #cn: [[1.8, 2.2], [0.8,1.2]]
+            cn: [[0.9, 1.1], [0.9,1.1]]
+            hb.sum: [[0.9, 1.3], [1.7,2.3]]
+        facecolor: [red,blue]
+        xlabel: '$d$(Ti-O) ($\mathrm{\AA}$)'
+        limits: [null, 2.6, null, null] 
+#        axvline:
+#            my_value:
+#                value: 2.5
+#                ls: ':'
+#                color: 'b'
+#                label: 'whatever'
+    d6.mean:
+        mask:
+            #cn: [[1.8, 2.2], [0.8,1.2]]
+            cn: [[0.9, 1.1], [0.9,1.1]]
+            hb.sum: [[0.9, 1.3], [1.7,2.3]]
+        facecolor: [red,blue] #[green, orange]
+        xlabel: '$d$(O-H) ($\mathrm{\AA}$)'
+        #limits: [null,1.2, null, null] 
+#    hb.sum:
+#        mask:
+#            cn: [[0.8, 1.2], [0.8,1.2]]
+#            hb.sum: [[0.9, 1.3], [1.7,2.3]]
+#        facecolor: [red, blue]
+#        xlabel: 'number of Hbonds'
+#        #limits: [null,1.2, null, null] 
+
+

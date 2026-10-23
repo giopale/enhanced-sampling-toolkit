@@ -1,0 +1,22 @@
+hydra:
+  job_logging: { disabled }       # Disable job logging
+  hydra_logging: { disabled }      # Disable Hydra's internal logging
+  run:
+    dir: ${hydra:runtime.cwd} # set run directory
+
+
+defaults:
+    - _self_
+    - case: atio2-h2o
+    - command: ??? # loads _target_
+
+file_lammps_input: lammps.input
+file_lammps_log: log.lammps
+file_plumed_input: plumed.plumed
+
+
+cvs:
+    d:
+        limits: [null, null]
+    cn:
+        limits: [null, null]

@@ -1,0 +1,364 @@
+# @package _global_
+
+mplstyle:
+    dir: /users/pgiorgio/scripts/mymplstyles/mymplstyles
+    style: jcp.mplstyle
+
+size: [3.37, 1.89]
+
+
+dir_md: '.'
+dir_job: '00*'
+
+file_fes:  'pot*-rew-fes.dat'
+
+temp: 350
+bias_factor: null 
+
+nbins: [100, 100]
+ngrid: [100, 100]
+# nbins is equal to nedges -1
+#sigma: [null, null]
+
+
+file_model_devi: model_devi.out
+
+property: fes
+just_average: False
+time_interval: [null, null] # md time interval in nanoseconds
+
+
+convergence_barrier:
+  time_interval: [0,20]
+  time_step: 2
+
+
+cvs:
+    select: null #[ 'd3', 'cn']
+    add: null
+#    filter:
+#        cn: [0.8,3.0]
+    d0_mean: 
+        limits: [1.85,2.2]
+        sigma: 0.003
+    d1_mean: 
+        limits: [1.85,2.2]
+        sigma: 0.003
+
+
+
+surface_data:
+
+#    points_to_mark:
+#      draw: True
+#      units: [d0,dOH_min]
+#      legend: True
+#      data:
+#        ohradical:
+#          values: [[2.1704,1.0247]]
+#          errors: [[0.1,0.05]]
+#          kwargs:
+#            label: 'AIMD OH$^\bullet$'
+#            marker: 'x'
+#            color: 'r'
+#        water:
+#          values: [[2.14,0.95]]
+#          kwargs:
+#            label: 'AIMD H$_2$O'
+#            marker: 'x'
+#            color: 'g'
+
+
+
+    fes: 
+      file_data: 'pot*-rew-fes.dat'
+      #mark_points:
+      #  points: *struct_points #[[2.0,1.9], [2.0,1.0],[1.1,0.1],[2.0,0.1]]
+      mep:
+          #midpoint: [1.9,1]
+          #midpoint: [1.9,1.5]
+          split: vertical  #horizontal, vertical, triple # direction of the cut
+          nminima: 3
+          compute_all: True
+          load: False
+          fname_mep: null
+          fname_mep_out: null
+          maxsteps: 2000
+          traj_every: 50
+          npts: 15
+          flexible: False
+          dt: 0.01
+          print_convergence: False
+
+          plot:
+            limits: [null, null, null, null]
+            size: [3.37, 1.89]
+            row: 2
+            col: 2
+            scale: 1.5
+            hspace: 0.3
+            fontsize: 6
+            subplots_adjust:
+              left: 0.2
+              bottom: 0.2
+              right: 0.95
+              top: 0.98
+
+             
+      plot:
+          size: [3.37, 1.89]
+          row: 2
+          col: 2
+          scale: 1.5
+          hspace: 0.3
+          fontsize: 6
+          vmin: 0.0
+          vmax: 2.0
+          levels: [0.0,0.02, 0.04, 0.06, 0.08,0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0,1.1]
+          contours_fes: True
+          contours: False
+          colormap: ['Blues','Greens','Greys']
+          reverse_colormap: True
+          plot_colors: true
+          limits: [null, null, null, null]
+          xlabel: null #['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']  
+          ylabel: null #['cn(O$_{\mathrm{ad}}$-H)']
+          cbarlabel: 'energy (eV)'
+          title: null
+          suptitle: null
+          mep: True
+
+      save:
+          plot: ['.png', ]
+
+ 
+    max_devi_f: 
+      file_data: 'pot*-rew-fes.dat'
+      file_prop: model_devi.out
+      prop_field: max_devi_f
+      #mark_points:
+      #  points: *struct_points #[[2.0,1.9], [2.0,1.0],[1.1,0.1],[2.0,0.1]]
+      mep:
+          #midpoint: [0,2.36]
+          split: vertical  #horizontal, vertical, triple # direction of the cut
+          compute_all: True
+          load: False
+          fname_mep: null
+          fname_mep_out: null
+          maxsteps: 2000
+          traj_every: 50
+          npts: 15
+          flexible: False
+          dt: 0.01
+          print_convergence: False
+          save:
+              plot: mep.png
+             
+      plot:
+          size: [3.37, 1.89]
+          row: 2
+          col: 2
+          scale: 1.5
+          hspace: 0.3
+          fontsize: 6
+          vmin: 0.2
+          vmax: 0.8
+          levels: 15
+          colormap: ['Blues','Greens','Greys']
+          reverse_colormap: False
+          limits: [null, null, null, null]
+          xlabel: null #['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']  
+          ylabel: null #['cn(O$_{\mathrm{ad}}$-H)']
+          cbarlabel: 'max_devi_f'
+          title: null
+          suptitle: null
+          mep: True
+      save:
+          plot: ['fes.png', 'fes.pdf']
+
+
+
+    dOOliq_min: 
+      file_data: 'pot*-rew-fes.dat'
+      file_prop: CV-dOOliq_min
+      prop_field: dOOliq_min
+      #mark_points:
+      #  points: *struct_points #[[2.0,1.9], [2.0,1.0],[1.1,0.1],[2.0,0.1]]
+      special_points:
+        cases:
+          #polaron_surface:
+          #  file: /capstor/scratch/cscs/pgiorgio/LAMMPS/atio2-h2o-charged-opes-1/production/model-24/d0-cn/A/structures_from_dataset/traj_polaron_surf/CV-cn_O2c
+          #polaron_solid:
+          #  file: /capstor/scratch/cscs/pgiorgio/LAMMPS/atio2-h2o-charged-opes-1/production/model-24/d0-cn/A/structures_from_dataset/traj_polaron_solid/CV-cn_O2c
+      mep:
+          #midpoint: [0,2.36]
+          split: vertical  #horizontal, vertical, triple # direction of the cut
+          compute_all: True
+          load: False
+          fname_mep: null
+          fname_mep_out: null
+          maxsteps: 2000
+          traj_every: 50
+          npts: 15
+          flexible: False
+          dt: 0.01
+          print_convergence: False
+          save:
+              plot: mep.png
+             
+      plot:
+          size: [3.37, 1.89]
+          row: 2
+          col: 2
+          scale: 1.5
+          hspace: 0.3
+          fontsize: 10
+          vmin: 2.2
+          vmax: 2.8
+          levels: 6 #[1.0, 2.0, 3.0, 4.0]
+          colormap: ['Oranges','Oranges','Greys']
+          reverse_colormap: True
+          contours: False
+          color_contour: 'g'
+          limits: [null, null, null, null]
+          xlabel: null #['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']  
+          ylabel: null #['cn(O$_{\mathrm{ad}}$-H)']
+          cbarlabel: 'min[$d$(O$_{\mathrm{ads}}$-O$_{\mathrm{liq}}$)] ($\mathrm{\AA}$)'
+          title: null
+          suptitle: null
+          mep: false
+      save:
+          plot: ['.png']
+
+
+    cn_O2c: 
+      file_data: 'pot*-rew-fes.dat'
+      file_prop: CV-cn_O2c
+      prop_field: cn_O2c
+      #mark_points:
+      #  points: *struct_points #[[2.0,1.9], [2.0,1.0],[1.1,0.1],[2.0,0.1]]
+      special_points:
+        cases:
+          #polaron_surface:
+          #  file: /capstor/scratch/cscs/pgiorgio/LAMMPS/atio2-h2o-charged-opes-1/production/model-24/d0-cn/A/structures_from_dataset/traj_polaron_surf/CV-cn_O2c
+          #polaron_solid:
+          #  file: /capstor/scratch/cscs/pgiorgio/LAMMPS/atio2-h2o-charged-opes-1/production/model-24/d0-cn/A/structures_from_dataset/traj_polaron_solid/CV-cn_O2c
+      mep:
+          #midpoint: [0,2.36]
+          split: vertical  #horizontal, vertical, triple # direction of the cut
+          compute_all: True
+          load: False
+          fname_mep: null
+          fname_mep_out: null
+          maxsteps: 2000
+          traj_every: 50
+          npts: 15
+          flexible: False
+          dt: 0.01
+          print_convergence: False
+          save:
+              plot: mep.png
+             
+      plot:
+          size: [3.37, 1.89]
+          row: 2
+          col: 2
+          scale: 1.5
+          hspace: 0.3
+          fontsize: 6
+          vmin: 0.0
+          vmax: 6
+          levels: [1.0, 2.0, 3.0, 4.0]
+          colormap: ['YlOrBr','Greens','Greys']
+          reverse_colormap: False
+          limits: [null, null, null, null]
+          xlabel: null #['min$[d$(O$_{\mathrm{surf}}$-O$_{\mathrm{ad}}$)] ', '($\mathrm{\AA}$)']  
+          ylabel: null #['cn(O$_{\mathrm{ad}}$-H)']
+          cbarlabel: 'cn_O2c'
+          title: null
+          suptitle: null
+          mep: True
+      save:
+          plot: ['.png', '.pdf']
+
+find_structures:
+    # these points are from the MEP of /capstor/scratch/cscs/pgiorgio/LAMMPS/atio2-h2o-charged-opes-1/production/model-24/d0-cn/A/000
+    #points: &struct_points [[2.126, 1.978],[1.904, 1.003],[1.874, 0.000]]
+    points: &struct_points [[1.99, 1.33]]
+    probability_thr: 0.9
+    max_structures: 100000
+    save_structures:
+      do_save: False
+      file_dump_h5: dump.h5
+      file_lammps: ['traj.lammpstrj.0', 'traj.lammpstrj.1', 'traj.lammpstrj.2', 'traj.lammpstrj']
+      type_map:
+        1: H
+        2: O
+        3: Ti
+
+
+find_structures_level_set:
+    isovalue: 0.1
+    choose:
+      probability_thr: 0.9
+#      random: 
+#        seed: 39475
+#        nstruct: 400
+        
+    save_structures:
+      do_save: False
+#      max_structures: 400
+      file_dump_h5: dump.h5
+      file_lammps: ['traj.lammpstrj.0', 'traj.lammpstrj.1', 'traj.lammpstrj.2', 'traj.lammpstrj']
+      type_map:
+        1: H
+        2: O
+        3: Ti
+
+#cvs_along_mep:
+#    select_by_coordinate:
+#        cn: [null, null]
+#    plot:
+#        xaxis: 'linear' # 'linear', 'cn'
+#    axvline: null #[2] # zero based
+#    axvline_cn: [0.5,1.5] # zero based
+#    points: null #[0,7,9,14]
+#
+#    cvs:
+#      dOOliq_min:
+#        plot:
+#          color: 'darkorange'
+#          prop_ax:
+#           ylabel: 'min$[d$(O$_{\mathrm{ad}}$-O$_{\mathrm{liq}}$)] ($\mathrm{\AA}$)'
+#          axvline:
+#           value:
+#           kwargs:...
+#             color: ...
+#           
+
+
+proton_transfer:
+    file_traj: traj.xyz
+    kind: ??? # direct, indirect, null
+    case: null # A, B, ...
+    indices_type1: 262 # 1-based indexing here; conversion to 0-based in the program
+    indices_type2: null #311 #[313, 218]
+    indices_water: &all_water_ox [153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 263]
+    surf_sites:
+        A:
+            indices_type2: 311
+        B:
+            indices_type2: [313, 218]
+        C:
+            indices_type2: [312, 310]
+        D:
+            indices_type2: 220
+        liquid:
+            indices_type2: *all_water_ox
+
+
+
+
+
+
+

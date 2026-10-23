@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.convergence_barrier_time.run"
+param: "Hello from convergence_barrier_time"

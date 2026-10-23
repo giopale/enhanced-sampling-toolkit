@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.find_structures.run"
+param: "Hello from find_structures"

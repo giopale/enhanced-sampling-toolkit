@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.plot_opes_c.run"
+param: "Hello from plot_opes_c"

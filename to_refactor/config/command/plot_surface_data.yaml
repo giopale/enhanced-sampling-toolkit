@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.plot_surface_data.run"
+param: "Hello from plot_surface_data"

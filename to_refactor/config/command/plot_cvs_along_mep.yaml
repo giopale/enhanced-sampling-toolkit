@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.plot_cvs_along_mep.run"
+param: "Hello from plot_cvs_along_mep"

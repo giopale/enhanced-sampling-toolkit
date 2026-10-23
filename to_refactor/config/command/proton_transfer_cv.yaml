@@ -1,0 +1,4 @@
+# @package _global_
+
+_target_: "commands.proton_transfer_cv.run"
+param: "Hello from proton_transfer_cv"
