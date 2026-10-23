@@ -393,6 +393,11 @@ Notes on what was built:
 
 **Status:** todo
 
+**Open question (ask before implementing):** the old code weights frames by the main bias only
+(`opes.bias`). The wall biases (`uwall.bias`, `lwall.bias`) are now detected
+(`RunMetadata.wall_bias_columns`) but not used. Was leaving them out deliberate? Including them
+changes the reweighted surface near the walls.
+
 ### Current state
 - Two implementations exist:
   - `ectoolkits_reweight.py` (≈1100 lines): grid-point-by-grid-point `calc_FES`,
