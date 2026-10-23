@@ -67,6 +67,21 @@ class FilesConfig(_Section):
     colvar: str = "COLVAR"
 
 
+class SimulationConfig(_Section):
+    """Overrides for settings normally read from the simulation files.
+
+    Leave these out unless a value can't be read (or is read wrongly) from ``log.lammps``, the
+    PLUMED input or the bias state file.
+    """
+
+    temperature: float | None = Field(default=None, gt=0)  # K
+    timestep: float | None = Field(default=None, gt=0)  # ps
+    bias_factor: float | None = Field(default=None, gt=1)
+    bias_column: str | None = None  # COLVAR column with the bias, e.g. "opes.bias"
+    time_units: str | None = None  # PLUMED time units of COLVAR, e.g. "ps"
+    energy_units: str | None = None  # PLUMED energy units of the bias, e.g. "kj/mol"
+
+
 class CVConfig(_Section):
     """Settings for one collective variable.
 
@@ -146,6 +161,7 @@ class ProjectConfig(_Section):
 
     runs: RunsConfig = Field(default_factory=RunsConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
+    simulation: SimulationConfig = Field(default_factory=SimulationConfig)
     cv: dict[str, CVConfig] = Field(default_factory=dict)
     atoms: AtomsConfig = Field(default_factory=AtomsConfig)
     plot: PlotConfig = Field(default_factory=PlotConfig)
@@ -290,6 +306,13 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         "  lammps_log: log.lammps",
         "  plumed_input: plumed.plumed",
         "  colvar: COLVAR",
+        "",
+        "# Only needed when a value can't be read from the simulation files:",
+        "# simulation:",
+        "#   temperature: 350     # K",
+        "#   timestep: 0.0005     # ps",
+        "#   bias_factor: 10",
+        "#   bias_column: opes.bias",
         "",
         "# One entry per collective variable. All keys are optional:",
         "#   label      axis label used in plots",

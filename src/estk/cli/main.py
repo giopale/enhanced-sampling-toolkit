@@ -115,6 +115,61 @@ def _discover_cvs(root: Path, pattern: str) -> list[str]:
     return []
 
 
+@app.command()
+@handle_errors
+def runs() -> None:
+    """List the runs and the simulation settings read for each one."""
+    from estk.project import Project
+
+    project = Project(load_config(_state["config"]))
+    table = Table("run", "T (K)", "timestep (ps)", "bias", "bias factor", "walls", "units")
+    for run in project.runs:
+        meta = run.metadata
+        walls = ", ".join(f"{cv} [{_fmt(lo)}, {_fmt(hi)}]" for cv, (lo, hi) in meta.walls.items())
+        table.add_row(
+            run.name,
+            _fmt(meta.temperature),
+            _fmt(meta.timestep),
+            meta.bias_column or "-",
+            _fmt(meta.bias_factor),
+            walls or "-",
+            f"{meta.time_units}, {meta.energy_units}",
+        )
+    console.print(table)
+    overridden = sorted(
+        {k for r in project.runs for k, v in r.metadata.sources.items() if v == CONFIG_FILENAME}
+    )
+    if overridden:
+        console.print(f"set in {CONFIG_FILENAME}: {', '.join(overridden)}")
+
+
+@app.command()
+@handle_errors
+def cvs(
+    names: Annotated[list[str], typer.Argument(help="CVs or other COLVAR columns to load.")],
+    time: Annotated[
+        tuple[float, float] | None,
+        typer.Option(help="Time window in ns, e.g. --time 0 20 (use inf for no end)."),
+    ] = None,
+) -> None:
+    """Load CVs from every run and show how many rows were kept and the range of each CV."""
+    from estk.project import Project
+
+    project = Project(load_config(_state["config"]))
+    table = Table("run", "rows", "time (ns)", *names, "notes")
+    for run in project.runs:
+        data = run.load_cvs(names, time=time, bias=False)
+        ranges = [f"{data[n].min():.4g} – {data[n].max():.4g}" for n in names]
+        span = f"{data.time[0] / 1000:.3g} – {data.time[-1] / 1000:.3g}"
+        notes = data.report.summary().split(", ", 1)
+        table.add_row(run.name, str(len(data)), span, *ranges, notes[1] if len(notes) > 1 else "")
+    console.print(table)
+
+
+def _fmt(value: float | None) -> str:
+    return "-" if value is None else f"{value:g}"
+
+
 @config_app.command("show")
 @handle_errors
 def config_show() -> None:

@@ -4,7 +4,7 @@ from estk import __version__
 from estk.cli.main import app
 from estk.config import load_config
 
-from .conftest import DATA_DIR, write_colvar
+from .conftest import DATA_DIR, make_run, write_colvar
 
 runner = CliRunner()
 
@@ -89,3 +89,35 @@ def test_config_migrate_to_stdout(workdir):
     result = run("config", "migrate", str(DATA_DIR / "case_minimal.yaml"))
     assert result.exit_code == 0, result.output
     assert "  d0:" in result.output
+
+
+def test_runs(workdir):
+    make_run(workdir / "000")
+    make_run(workdir / "001")
+    (workdir / "estk.yaml").write_text("runs:\n  pattern: '0*'\nsimulation:\n  temperature: 300\n")
+    result = run("runs")
+    assert result.exit_code == 0, result.output
+    assert "000" in result.output and "001" in result.output
+    assert "opes.bias" in result.output
+    assert "set in estk.yaml: temperature" in result.output
+
+
+def test_runs_none_found(workdir):
+    result = run("runs")
+    assert result.exit_code == 1
+    assert "no run folders" in result.output
+
+
+def test_cvs(workdir):
+    make_run(workdir / "000")
+    result = run("cvs", "d0", "cn", "--time", "0", "0.0002")
+    assert result.exit_code == 0, result.output
+    assert "41" in result.output
+    assert "1.5 – 1.9" in result.output
+
+
+def test_cvs_unknown(workdir):
+    make_run(workdir / "000")
+    result = run("cvs", "nope")
+    assert result.exit_code == 1
+    assert "CV-nope" in result.output

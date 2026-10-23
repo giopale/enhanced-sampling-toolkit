@@ -134,8 +134,8 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 1 | [Packaging and entry point](#1-packaging-and-entry-point) | in progress |
 | 2 | [Configuration](#2-configuration) | done |
 | 3 | [Logging and error handling](#3-logging-and-error-handling) | done |
-| 4 | [Run discovery and simulation metadata](#4-run-discovery-and-simulation-metadata) | todo |
-| 5 | [CV data loading](#5-cv-data-loading) | todo |
+| 4 | [Run discovery and simulation metadata](#4-run-discovery-and-simulation-metadata) | done |
+| 5 | [CV data loading](#5-cv-data-loading) | done |
 | 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | todo |
 | 7 | [Combining runs](#7-combining-runs) | todo |
 | 8 | [Bandwidth selection](#8-bandwidth-selection) | todo |
@@ -275,7 +275,26 @@ part of section 12.
 
 ## 4. Run discovery and simulation metadata
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/io/lammps.py`, `src/estk/io/plumed.py`, `src/estk/units.py`,
+`src/estk/project.py` (`Project`, `Run`, `RunMetadata`), the `simulation:` overrides in
+estk.yaml, and `estk runs`. Tested in `tests/test_io_lammps_plumed.py` and
+`tests/test_project.py`.
+
+Notes on what was built:
+- LAMMPS: units, timestep and thermostat temperature are those in effect at the **last** `run`
+  command (equilibration settings before it are ignored). Supported thermostats: `nvt`/`npt`
+  (`temp` keyword) and `langevin`, `temp/csvr`, `temp/csld`, `temp/berendsen`, `temp/rescale`.
+  A temperature ramp or several thermostats give a warning.
+- PLUMED: `INCLUDE`, multi-line `...` blocks, `{...}` values, `LABEL=`, `ENDPLUMED`, `UNITS`.
+  Walls with several `ARG`/`AT` values are read per CV. The bias factor comes from `BIASFACTOR`,
+  else from `#! SET biasfactor` in the state file. If there are several biases the first is used
+  (warning). If the log has no temperature, the bias's `TEMP=` is used.
+- Runs are folders matching the pattern **that contain a COLVAR file** (others are skipped and
+  listed), in natural order (`run-2` before `run-10`). The folder name identifies the run.
+- k_B T uses CODATA R = 8.314462618e-3 kJ/(mol K) (the old code used 8.3144621e-3; the relative
+  difference is 1e-8) and is given in the energy units of the bias.
 
 ### Current state
 - `utils.find_job_dirs(dir_md, dir_job)` globs run folders.
@@ -313,7 +332,26 @@ part of section 12.
 
 ## 5. CV data loading
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/io/colvar.py` (`read_table`, `load_cv_table`, `CVTable`, `LoadReport`),
+`Run.load_cvs` / `Project.load_cvs`, and `estk cvs NAME... [--time START END]`, which shows the
+rows kept and the range of each CV per run. Tested in `tests/test_project.py`.
+
+Notes on what was built:
+- Files are joined on time rounded to 1e-6 ps, so `0.0050` and `0.005000` match. Times are
+  converted to ps first (PLUMED `UNITS TIME`, or `step × timestep` for files whose first
+  column is `step`).
+- In each file, repeated times (restarts) keep the **last** occurrence, as the old code did.
+- Lines with the wrong number of columns (a cut-off last line) are skipped with a warning; extra
+  `#! FIELDS` lines in the middle of a file are ignored.
+- A file holding one CV can name its column anything; with several data columns the column
+  must have the CV's name.
+- `CVTable.report` counts duplicated times, rows missing per file, rows outside the time window,
+  NaN rows per column and filtered rows.
+- `CVTable.bias` is the main bias only (e.g. `opes.bias`), as in the old code. Wall biases
+  (`uwall.bias`, ...) are listed in `RunMetadata.wall_bias_columns`; whether to include them in
+  the weights is decided in section 6.
 
 ### Current state
 - `utils.read_colvar_in_time_interval` reads COLVAR rows in a time window (config in ns,
@@ -330,15 +368,16 @@ part of section 12.
 ### Problems
 - Four copies that have already diverged (scaling exists in one, NaN warnings differ).
 - `masks[0] & masks[1]` assumes exactly two CVs.
-- Rows are merged by position (`safe_stack_colvar`), not by time, so a missing or duplicated
-  row in a `CV-*` file shifts every following row. (`estimation_bandwidth/minimize_scv_approx.py`
-  already has de-duplication and time alignment that could be reused.)
+- `safe_stack_colvar` requires the time columns of COLVAR and each `CV-*` file to be identical:
+  one missing or extra row in a `CV-*` file makes the whole run fail (with "Time columns do not
+  match!" or a shape error), even though the other rows could be used.
+  (`estimation_bandwidth/minimize_scv_approx.py` already has time alignment that could be
+  reused.)
 - The time-unit assumption (ns in config, ps in COLVAR) is implicit.
 
 ### Target design
 - `estk.io.colvar.load_cv_table(run, cvs, *, time=None, extra=None) -> CVTable`.
-  - `CVTable` holds `time`, `bias`, and a column per CV (a small wrapper around a structured
-    array or `pandas.DataFrame`).
+  - `CVTable` holds `time`, `bias`, and a column per CV (numpy arrays; no pandas dependency).
   - Columns come from COLVAR, `CV-<name>` files (from `cv.<name>.source` or the default naming
     rule), or property files (`extra={"max_devi_f": "model_devi.out"}`).
   - Rows are joined **on time**, with duplicate times removed (keep last, as the SCV script

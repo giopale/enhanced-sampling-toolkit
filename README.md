@@ -4,8 +4,8 @@ Tools for analysing MD + enhanced sampling simulations (LAMMPS + PLUMED/OPES): r
 free-energy surfaces, minimum-energy paths, barrier convergence and structure extraction.
 
 The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
-for the plan and the status of each part. At this stage only the project configuration is in
-place.
+for the plan and the status of each part. At this stage the project configuration, reading the
+simulation settings and loading CV data are in place.
 
 ## Install
 
@@ -23,6 +23,18 @@ In the folder that contains your run folders (`000/`, `001/`, ...):
 estk init --pattern '00*'    # writes estk.yaml, with an entry for each CV found in COLVAR
 estk config show             # settings in effect and where each one comes from
 estk config validate         # check estk.yaml after editing it
+estk runs                    # temperature, timestep, bias, walls... read for each run
+estk cvs d0 cn --time 0 20   # rows kept and range of each CV per run, 0-20 ns
+```
+
+From Python:
+
+```python
+from estk import Project
+
+project = Project()                      # uses the nearest estk.yaml
+tables = project.load_cvs(["d0", "cn"], time=(0, 20))
+tables[0]["d0"], tables[0].bias, tables[0].kbt
 ```
 
 Coming from the old Hydra configuration:
