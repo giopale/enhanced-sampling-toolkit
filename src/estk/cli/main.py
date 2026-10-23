@@ -28,14 +28,14 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_enable=False,
 )
-config_app = typer.Typer(help="Inspect, check and migrate estk.toml.", no_args_is_help=True)
+config_app = typer.Typer(help="Inspect, check and migrate estk.yaml.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
 
 console = Console()
 err_console = Console(stderr=True)
 log = get_logger(__name__)
 
-# Options given before the subcommand (estk -v --config x.toml ...).
+# Options given before the subcommand (estk -v --config x.yaml ...).
 _state: dict[str, Any] = {"verbosity": 0, "config": None}
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -88,7 +88,7 @@ def init(
     pattern: Annotated[str, typer.Option(help="Glob pattern matching the run folders.")] = "*",
     force: Annotated[bool, typer.Option("--force", help="Overwrite an existing file.")] = False,
 ) -> None:
-    """Write a commented estk.toml in the current folder.
+    """Write a commented estk.yaml in the current folder.
 
     If a run folder with a COLVAR file is found, a section is added for each of its CVs.
     """
@@ -144,7 +144,7 @@ def _format_value(value: Any) -> str:
 @config_app.command("validate")
 @handle_errors
 def config_validate() -> None:
-    """Check estk.toml; exits with code 1 if it is invalid."""
+    """Check estk.yaml; exits with code 1 if it is invalid."""
     path = _state["config"] or find_config()
     if path is None:
         raise EstError(f"no {CONFIG_FILENAME} found in this folder or its parents")
@@ -161,7 +161,7 @@ def config_migrate(
     ] = None,
     force: Annotated[bool, typer.Option("--force", help="Overwrite the output file.")] = False,
 ) -> None:
-    """Convert an old Hydra case file to estk.toml."""
+    """Convert an old Hydra case file to estk.yaml."""
     from estk.migrate import migrate_case_yaml
 
     text, dropped = migrate_case_yaml(case_file)

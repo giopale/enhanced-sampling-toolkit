@@ -12,13 +12,12 @@ dependencies = [
     "numpy",
     "pydantic>=2",
     "rich",
+    "pyyaml",
     "typer",
-    "tomli; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
-migrate = ["pyyaml"]
-dev = ["pytest", "ruff", "pyyaml"]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 estk = "estk.cli.main:app"

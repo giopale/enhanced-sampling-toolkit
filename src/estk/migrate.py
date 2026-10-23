@@ -1,18 +1,20 @@
-"""Convert an old Hydra case file (``to_refactor/config/case/*.yaml``) to ``estk.toml``.
+"""Convert an old Hydra case file (``to_refactor/config/case/*.yaml``) to ``estk.yaml``.
 
 Only facts about the system are carried over: run location, file names, CV limits and
 bandwidths, atom types and atom index groups. Everything else (plot cosmetics, settings of
 individual commands, choices for a single run) is reported as dropped, with a pointer to where
-it lives in the new design.
+it lives in the new design. YAML anchors (``&name`` / ``*name``) of the values that are kept
+are preserved.
 """
 
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from estk import _yaml
 from estk.errors import ConfigError
 
 # Where the settings that are not migrated go in the new design (sections of REFACTOR.md).
@@ -35,23 +37,16 @@ _DEFAULT_HINT = "flag of the relevant command"
 
 
 def migrate_case_yaml(path: Path | str) -> tuple[str, list[str]]:
-    """Return ``(toml_text, dropped)`` for an old case YAML file.
+    """Return ``(yaml_text, dropped)`` for an old case YAML file.
 
     ``dropped`` lists the settings that were not migrated, each with a hint of where it goes now.
     """
-    try:
-        import yaml
-    except ImportError:  # pragma: no cover
-        raise ConfigError(
-            "migrating needs PyYAML: pip install 'enhanced-sampling-toolkit[migrate]'"
-        ) from None
-
     path = Path(path)
     if not path.is_file():
         raise ConfigError("file not found", path=path)
     try:
-        with open(path) as f:
-            data = yaml.safe_load(f) or {}
+        data, anchors = _yaml.load(path.read_text())
+        data = data or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"invalid YAML: {exc}", path=path) from None
     if not isinstance(data, dict):
@@ -97,9 +92,16 @@ def migrate_case_yaml(path: Path | str) -> tuple[str, list[str]]:
     header = (
         f"# Migrated from {path.name} by `estk config migrate`.\n"
         "# Settings that are not facts about the system were left out; see the list printed\n"
-        "# by the command.\n"
+        "# by the command.\n\n"
     )
-    return header + _to_toml(out), dropped
+    out = {section: values for section, values in out.items() if values}
+    body = _yaml.dump(out, anchors)
+    # blank line between top-level sections
+    body = "\n".join(
+        ("\n" + line) if line[:1].isalpha() and i else line
+        for i, line in enumerate(body.splitlines())
+    )
+    return header + body + "\n", dropped
 
 
 def _migrate_cv(settings: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -107,14 +109,8 @@ def _migrate_cv(settings: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     rest = []
     for key, value in settings.items():
         if key == "limits" and value is not None:
-            lo, hi = value
-            if lo is not None and hi is not None:
-                cv["limits"] = [lo, hi]
-            else:
-                if lo is not None:
-                    cv["min"] = lo
-                if hi is not None:
-                    cv["max"] = hi
+            if any(v is not None for v in value):
+                cv["limits"] = value  # same object, so a shared anchor is kept
         elif key == "sigma":
             if value is not None:
                 cv["bandwidth"] = value
@@ -139,7 +135,7 @@ def _proton_transfer_groups(pt: dict[str, Any]) -> dict[str, list[int]]:
     def add(name: str, value: Any) -> None:
         if value is None:
             return
-        groups[name] = [int(v) for v in (value if isinstance(value, list) else [value])]
+        groups[name] = value if isinstance(value, list) else [value]  # keeps anchors
 
     add("pt_type1", pt.get("indices_type1"))
     add("pt_type2", pt.get("indices_type2"))
@@ -154,47 +150,3 @@ def _hint(key: str) -> str:
     if hint is None and key.startswith("cvs."):
         hint = "plot styles or the relevant command's flags"
     return f"{key} -> {hint or _DEFAULT_HINT}"
-
-
-# --- minimal TOML writer (enough for the structures produced above) ---------------------------
-
-_BARE_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
-
-
-def _key(key: Any) -> str:
-    key = str(key)
-    return key if _BARE_KEY.match(key) else json.dumps(key, ensure_ascii=False)
-
-
-def _value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return repr(value)
-    if isinstance(value, (str, Path)):
-        return json.dumps(str(value), ensure_ascii=False)
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_value(v) for v in value) + "]"
-    if isinstance(value, dict):
-        return "{ " + ", ".join(f"{_key(k)} = {_value(v)}" for k, v in value.items()) + " }"
-    raise TypeError(f"can't write {type(value).__name__} to TOML")
-
-
-def _to_toml(out: dict[str, dict[str, Any]]) -> str:
-    lines: list[str] = []
-    for section in ("runs", "files"):
-        if out[section]:
-            lines.append(f"\n[{section}]")
-            lines += [f"{_key(k)} = {_value(v)}" for k, v in out[section].items()]
-    for name, cv in out["cv"].items():
-        lines.append(f"\n[cv.{_key(name)}]")
-        lines += [f"{_key(k)} = {_value(v)}" for k, v in cv.items()]
-    atoms = out["atoms"]
-    if atoms:
-        lines.append("\n[atoms]")
-        if "type_map" in atoms:
-            lines.append(f"type_map = {_value(atoms['type_map'])}")
-        if "groups" in atoms:
-            lines.append("\n[atoms.groups]")
-            lines += [f"{_key(k)} = {_value(v)}" for k, v in atoms["groups"].items()]
-    return "\n".join(lines).lstrip("\n") + "\n"

@@ -12,7 +12,7 @@ Update the status line of a section when work on it starts or finishes, and the
 [status overview](#status-overview) table with it.
 
 **Naming:** the pip package is `enhanced-sampling-toolkit`; the import package, the command and
-the project file are `estk` / `estk.toml`. (`est` is already taken on PyPI.)
+the project file are `estk` / `estk.yaml`. (`est` is already taken on PyPI.)
 
 ---
 
@@ -32,7 +32,7 @@ The toolkit becomes a **Python library first** (usable from scripts and notebook
 
    | Kind of setting | Lives in | Example |
    |---|---|---|
-   | Facts about the system | `estk.toml` (project file) | CV labels, limits, bandwidths, atom types |
+   | Facts about the system | `estk.yaml` (project file) | CV labels, limits, bandwidths, atom types |
    | Choices for this run | CLI flags / function arguments | which CVs, time window, number of minima |
    | Cosmetics | plot styles (`--style paper`, `.mplstyle`) | colours, font sizes, figure size |
    | Defaults | code | grid size 100×100, string method `dt` |
@@ -48,10 +48,10 @@ The toolkit becomes a **Python library first** (usable from scripts and notebook
 pyproject.toml
 src/estk/
 ├── __init__.py          # public API: Project, FreeEnergySurface, Path, ...
-├── config.py            # estk.toml schema (pydantic) + loader
+├── config.py            # estk.yaml schema (pydantic) + loader
 ├── errors.py            # EstError and subclasses
 ├── logging.py           # get_logger, CLI logging set-up
-├── migrate.py           # old Hydra case YAML -> estk.toml
+├── migrate.py           # old Hydra case YAML -> estk.yaml
 ├── project.py           # Project: run discovery + high-level methods
 ├── io/
 │   ├── lammps.py        # log.lammps parsing
@@ -88,33 +88,33 @@ docs/
 
 ### User-facing shape
 
-```toml
-# estk.toml
-[runs]
-root = "."
-pattern = "00*"
+```yaml
+# estk.yaml
+runs:
+  root: .
+  pattern: "00*"
 
-[files]                 # optional; these are the defaults
-lammps_log = "log.lammps"
-plumed_input = "plumed.plumed"
-colvar = "COLVAR"
+files:                  # optional; these are the defaults
+  lammps_log: log.lammps
+  plumed_input: plumed.plumed
+  colvar: COLVAR
 
-[cv.d0]
-label = "d(Ti–O) (Å)"
-limits = [1.5, 2.5]
-bandwidth = 0.0216
+cv:
+  d0:
+    label: "d(Ti–O) (Å)"
+    limits: [1.5, 2.5]
+    bandwidth: 0.0216
+  cn:
+    label: "CN(O–H)"
+    limits: [0.75, null]   # null: from the PLUMED walls, then the data range
 
-[cv.cn]
-label = "CN(O–H)"
-limits = [0.75, 3.0]
-
-[atoms]
-type_map = { 1 = "H", 2 = "O", 3 = "Ti" }
+atoms:
+  type_map: {1: H, 2: O, 3: Ti}
 ```
 
 ```python
 from estk import Project
-proj = Project("estk.toml")
+proj = Project("estk.yaml")
 fes = proj.reweight(cvs=("d0", "cn"), time=(0, 20))
 path = fes.mep(minima=2, split="vertical")
 print(path.barrier)
@@ -156,8 +156,8 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 
 **Status:** in progress
 
-**Done:** `pyproject.toml` (setuptools, `src/estk/`, Python ≥ 3.10, `estk` console script, extras
-`migrate` and `dev`, ruff and pytest settings), package skeleton with `estk --version`.
+**Done:** `pyproject.toml` (setuptools, `src/estk/`, Python ≥ 3.10, `estk` console script, `dev`
+extra, ruff and pytest settings), package skeleton with `estk --version`.
 **Left:** extras `structures`/`pt` and the scientific dependencies (added with the sections that
 need them); delete the dead files and `to_refactor/` once their logic has moved.
 
@@ -195,7 +195,7 @@ need them); delete the dead files and `to_refactor/` once their logic has moved.
 **Done:** `src/estk/config.py` (schema, `find_config`, `load_config`, `explain`, template),
 `src/estk/migrate.py`, and the commands `estk init`, `estk config show|validate|migrate`.
 Tested in `tests/test_config.py`, `tests/test_migrate.py`, `tests/test_cli.py`.
-**Handled elsewhere:** `config show` lists only `estk.toml` and default values for now; values
+**Handled elsewhere:** `config show` lists only `estk.yaml` and default values for now; values
 from CLI flags and from the simulation files are added with sections 4 and 6. Plot styles are
 part of section 12.
 
@@ -218,23 +218,27 @@ part of section 12.
 - Hydra override syntax (`cvs.select=[d0,cn]`, `???`, `+key=`) is a hurdle for newcomers.
 
 ### Target design
-- One small, optional `estk.toml` per project, validated with pydantic models in `estk/config.py`:
-  - `[runs]`: `root`, `pattern`
-  - `[files]`: names of the LAMMPS log, PLUMED input and COLVAR files
-  - `[cv.<name>]`: `label`, `units`, `limits`, `bandwidth`, `scale`, `source` (for CVs stored
-    in separate `CV-<name>` files). TOML has no `null`, so a one-sided range is written as
-    `min = 0.75` or `max = ...`; `limits = [lo, hi]` is shorthand for both.
-  - `[atoms]`: `type_map`, named groups of 1-based atom indices (e.g. `water_oxygens`, surface
+- One small, optional `estk.yaml` per project, validated with pydantic models in `estk/config.py`:
+  - `runs`: `root`, `pattern`
+  - `files`: names of the LAMMPS log, PLUMED input and COLVAR files
+  - `cv.<name>`: `label`, `units`, `limits`, `bandwidth`, `scale`, `source` (for CVs stored
+    in separate `CV-<name>` files). Either end of `limits` can be `null`; `min:` / `max:` can
+    be used instead.
+  - `atoms`: `type_map`, named groups of 1-based atom indices (e.g. `water_oxygens`, surface
     sites)
-  - `[plot]`: default `style`
+  - `plot`: default `style`
 - Every command setting becomes a CLI flag / function argument with a default in code.
 - Plot cosmetics move to bundled styles (`estk/plotting/styles/*.mplstyle`) chosen with `--style`.
   A user can pass a path to their own `.mplstyle`.
-- Precedence: CLI flag > `estk.toml` > value read from the simulation files > code default.
-- `estk init` writes a commented `estk.toml` with the CVs found in the first run's COLVAR.
+- Precedence: CLI flag > `estk.yaml` > value read from the simulation files > code default.
+- `estk init` writes a commented `estk.yaml` with the CVs found in the first run's COLVAR.
 - `estk config show` prints the merged, effective settings and where each value came from.
 - Migration: a one-off `estk config migrate case.yaml` that converts the CV block and atom
   groups of an old case file and lists the keys it dropped.
+- YAML, because it is what users of the old config already write, and it has `null` and
+  anchors (`&name` / `*name`) for values repeated across CVs. Duplicated keys are an error
+  (plain PyYAML silently keeps the last one), and pydantic validation catches YAML's type
+  guessing (e.g. `no` read as `false`).
 - The config file is searched for in the current folder and its parents; `--config` selects
   another file. Relative paths in it are resolved against the file's folder.
 
@@ -301,7 +305,7 @@ part of section 12.
   `bias_factor`, `energy_units`, `time_units`.
 - `Run` dataclass: `path`, `name` (the folder name, used as the stable identifier),
   `metadata` (temperature, kbT, timestep, bias factor, walls, units).
-- `Project.runs` discovers runs from `[runs]` and builds `Run` objects once.
+- `Project.runs` discovers runs from `runs` and builds `Run` objects once.
   The CLI shows a table with `estk runs`.
 - Physical constants and unit conversions live in one place (`estk/units.py`).
 
@@ -379,7 +383,7 @@ part of section 12.
   - Built on the log-sum-exp kernels from `utils_reweighting.py`, generalised to N dimensions
     with a full or diagonal bandwidth matrix. Memory is controlled by chunking over frames.
 - `Grid` object (limits + number of points per CV). Limits are resolved in this order:
-  CLI > `estk.toml` > PLUMED walls > data range.
+  CLI > `estk.yaml` > PLUMED walls > data range.
 - Bias column is detected from the PLUMED input (`*.bias` of the biasing action) or set with
   `--bias-column`.
 - `Project.reweight(cvs, *, property=None, time=None, grid=None, bandwidth=None)` runs each
@@ -452,7 +456,7 @@ part of section 12.
   - `scv(cvs, log_weights, *, method="approx"|"exact", ...)`
 - `bandwidth=` accepts a number or list per CV, `"silverman"` (default) or `"scv"`.
 - `estk bandwidth --cvs d0 cn [--method scv]` prints the values and can write them into
-  `estk.toml` (`--save`).
+  `estk.yaml` (`--save`).
 - The chosen bandwidths are stored in the output surface's metadata.
 
 ---
@@ -576,7 +580,7 @@ part of section 12.
   vmin=None, vmax=None, points=None) -> Axes`. One surface, one axes; returns the axes so
   users can compose their own figures.
 - `plot_surfaces(surfaces, ncols=2)` for the per-run + average grid.
-- Labels come from `cv.<name>.label` in `estk.toml`; the colour-bar label from the surface units.
+- Labels come from `cv.<name>.label` in `estk.yaml`; the colour-bar label from the surface units.
 - Bundled styles (`paper`, `slides`, `notebook`), plus any user `.mplstyle` path.
 - CLI: `estk plot surface d0-cn.fes.h5 [--path d0-cn.mep.h5] [--levels 0 0.8 0.1]
   [--style paper] [-o fes.png]`.
@@ -632,7 +636,7 @@ part of section 12.
 
 ### Target design
 - `estk.io.trajectory`: one `Trajectory` interface over H5MD, LAMMPS dump (with a cached step
-  index) and XYZ, returning `ase.Atoms` for given steps. Type map from `[atoms]`.
+  index) and XYZ, returning `ase.Atoms` for given steps. Type map from `atoms.type_map`.
 - `estk.analysis.structures`:
   - `frames_near(project, point, *, probability=0.9, max_frames=None) -> FrameSelection`
   - `frames_in_basin(project, fes, *, isovalue, point=None, sample=None, seed=None)
@@ -664,8 +668,8 @@ part of section 12.
 
 ### Target design
 - `estk.analysis.proton_transfer.compute(run, donor, acceptors, water, kind) -> CVTable`, with
-  index groups referenced by name from `[atoms]` in `estk.toml`
-  (e.g. `[atoms.groups] site_A = [311]`).
+  index groups referenced by name from `atoms.groups` in `estk.yaml`
+  (e.g. `site_A: [311]` under `atoms.groups`).
 - Output written in the `CV-<name>` format so it's picked up by section 5 automatically.
 - CLI: `estk cv proton-transfer --kind direct --donor ads_O --acceptor site_A --water water_O`.
 - Optional extra (`estk[pt]`), since it depends on MDAnalysis and ectoolkits.
@@ -705,7 +709,7 @@ part of section 12.
 
 ### Target design
 - `estk convert h5md-to-xyz TRAJ.h5 --frame N -o out.xyz` built on `estk.io.trajectory`
-  (section 14), using the `[atoms]` type map and handling general cells.
+  (section 14), using the `atoms.type_map` and handling general cells.
 - The SCV scripts become `estk bandwidth --method scv` (section 8).
 
 ---

@@ -9,7 +9,7 @@ from .conftest import DATA_DIR, REPO_ROOT
 
 def migrate_and_load(src, tmp_path):
     text, dropped = migrate_case_yaml(src)
-    out = tmp_path / "estk.toml"
+    out = tmp_path / "estk.yaml"
     out.write_text(text)
     return load_config(out), dropped
 
@@ -52,6 +52,14 @@ def test_real_case_files(tmp_path, name):
     cfg, dropped = migrate_and_load(src, tmp_path)
     assert cfg.cv
     assert any(item.startswith("surface_data") for item in dropped)
+
+
+def test_anchors_are_kept(tmp_path):
+    text, _ = migrate_case_yaml(DATA_DIR / "case_minimal.yaml")
+    assert "limits: &deltalimits [-1.5, 1.5]" in text
+    assert "limits: *deltalimits" in text
+    assert "water_oxygens: &water [153, 154, 155]" in text
+    assert "site_liquid: *water" in text
 
 
 def test_missing_file(tmp_path):

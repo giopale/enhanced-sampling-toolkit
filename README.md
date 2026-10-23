@@ -20,15 +20,15 @@ This installs the `estk` command and the `estk` Python package.
 In the folder that contains your run folders (`000/`, `001/`, ...):
 
 ```bash
-estk init --pattern '00*'    # writes estk.toml, with a section for each CV found in COLVAR
+estk init --pattern '00*'    # writes estk.yaml, with an entry for each CV found in COLVAR
 estk config show             # settings in effect and where each one comes from
-estk config validate         # check estk.toml after editing it
+estk config validate         # check estk.yaml after editing it
 ```
 
 Coming from the old Hydra configuration:
 
 ```bash
-estk config migrate to_refactor/config/case/atio2-h2o.yaml -o estk.toml
+estk config migrate to_refactor/config/case/atio2-h2o.yaml -o estk.yaml
 ```
 
 This keeps the facts about the system (CV limits and bandwidths, atom types, atom groups) and

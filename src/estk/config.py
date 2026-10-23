@@ -1,4 +1,4 @@
-"""Project configuration (``estk.toml``).
+"""Project configuration (``estk.yaml``).
 
 The file is optional. It only holds facts about the system being studied: where the runs are,
 how their files are named, the collective variables (CVs) and atom groups. Choices for a single
@@ -6,29 +6,32 @@ analysis are function arguments / CLI flags, and plot cosmetics are plot styles.
 
 Example::
 
-    [runs]
-    root = "."
-    pattern = "00*"
+    runs:
+      root: .
+      pattern: "00*"
 
-    [cv.d0]
-    label = "d(Ti–O) (Å)"
-    limits = [1.5, 2.5]
-    bandwidth = 0.0216
+    cv:
+      d0:
+        label: "d(Ti–O) (Å)"
+        limits: [1.5, 2.5]
+        bandwidth: 0.0216
+      cn:
+        limits: [0.75, null]   # null: taken from the PLUMED walls, then the data range
 
-    [cv.cn]
-    min = 0.75          # one-sided: the upper limit comes from the PLUMED walls or the data
-
-    [atoms]
-    type_map = { 1 = "H", 2 = "O", 3 = "Ti" }
-    groups = { site_A = [311], site_B = [313, 218] }
+    atoms:
+      type_map: {1: H, 2: O, 3: Ti}
+      groups:
+        water_oxygens: &water [153, 154, 155]
+        site_A: [311]
+        site_liquid: *water
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -39,14 +42,10 @@ from pydantic import (
     model_validator,
 )
 
+from estk import _yaml
 from estk.errors import ConfigError
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:  # pragma: no cover
-    import tomli as tomllib
-
-CONFIG_FILENAME = "estk.toml"
+CONFIG_FILENAME = "estk.yaml"
 
 
 class _Section(BaseModel):
@@ -71,8 +70,8 @@ class FilesConfig(_Section):
 class CVConfig(_Section):
     """Settings for one collective variable.
 
-    ``limits = [lo, hi]`` is a shorthand for ``min = lo`` and ``max = hi``. Limits left unset are
-    taken from the PLUMED walls, then from the data range.
+    ``limits: [lo, hi]`` is a shorthand for ``min: lo`` and ``max: hi``; either end can be null.
+    Limits left unset are taken from the PLUMED walls, then from the data range.
     """
 
     label: str | None = None
@@ -86,6 +85,8 @@ class CVConfig(_Section):
     @model_validator(mode="before")
     @classmethod
     def _expand_limits(cls, data: Any) -> Any:
+        if data is None:  # a CV listed with no settings
+            return {}
         if not isinstance(data, dict) or "limits" not in data:
             return data
         data = dict(data)
@@ -141,7 +142,7 @@ class PlotConfig(_Section):
 
 
 class ProjectConfig(_Section):
-    """Contents of ``estk.toml``."""
+    """Contents of ``estk.yaml``."""
 
     runs: RunsConfig = Field(default_factory=RunsConfig)
     files: FilesConfig = Field(default_factory=FilesConfig)
@@ -150,6 +151,14 @@ class ProjectConfig(_Section):
     plot: PlotConfig = Field(default_factory=PlotConfig)
 
     _path: Path | None = PrivateAttr(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _empty_sections(cls, data: Any) -> Any:
+        # A section whose keys are all commented out reads as null: treat it as "use defaults".
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if v is not None}
+        return data
 
     @property
     def path(self) -> Path | None:
@@ -170,7 +179,7 @@ class ProjectConfig(_Section):
     def explain(self) -> list[tuple[str, Any, str]]:
         """List ``(key, value, source)`` for every setting in effect.
 
-        ``source`` is ``"estk.toml"`` for values set in the file and ``"default"`` otherwise.
+        ``source`` is ``"estk.yaml"`` for values set in the file and ``"default"`` otherwise.
         Entries the user defines (CVs, atom groups) only show the fields that were set.
         """
         rows: list[tuple[str, Any, str]] = []
@@ -202,7 +211,7 @@ def _explain_model(
 
 
 def find_config(start: Path | None = None) -> Path | None:
-    """Return the nearest ``estk.toml`` in ``start`` (default: cwd) or its parents."""
+    """Return the nearest ``estk.yaml`` in ``start`` (default: cwd) or its parents."""
     start = (start or Path.cwd()).resolve()
     for folder in (start, *start.parents):
         candidate = folder / CONFIG_FILENAME
@@ -214,7 +223,7 @@ def find_config(start: Path | None = None) -> Path | None:
 def load_config(path: Path | str | None = None) -> ProjectConfig:
     """Load and validate a project configuration.
 
-    With ``path=None`` the nearest ``estk.toml`` is used (see ``find_config``); if there is none,
+    With ``path=None`` the nearest ``estk.yaml`` is used (see ``find_config``); if there is none,
     all defaults are returned. An explicit ``path`` that does not exist is an error.
     """
     if path is None:
@@ -226,10 +235,13 @@ def load_config(path: Path | str | None = None) -> ProjectConfig:
         raise ConfigError("configuration file not found", path=path)
 
     try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(f"invalid TOML: {exc}", path=path) from None
+        data, _ = _yaml.load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"invalid YAML: {exc}", path=path) from None
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        raise ConfigError("expected settings (key: value) at the top level", path=path)
 
     try:
         config = ProjectConfig.model_validate(data)
@@ -261,63 +273,56 @@ def is_bias_column(name: str) -> bool:
 
 
 def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | None = None) -> str:
-    """Return a commented ``estk.toml`` with a stub section for each CV in ``cvs``."""
+    """Return a commented ``estk.yaml`` with a stub entry for each CV in ``cvs``."""
     lines = [
         "# estk project file.",
         "# Everything is optional: settings left out use defaults or are read from the",
         "# simulation files (temperature, timestep, bias factor, PLUMED walls).",
         "",
-        "[runs]",
-        "# Folder containing the run folders, relative to this file.",
-        f"root = {_toml_string(root)}",
-        "# Glob pattern matching one folder per simulation run.",
-        f"pattern = {_toml_string(pattern)}",
+        "runs:",
+        "  # Folder containing the run folders, relative to this file.",
+        f"  root: {_yaml.scalar(root)}",
+        "  # Glob pattern matching one folder per simulation run.",
+        f"  pattern: {_yaml.scalar(pattern)}",
         "",
-        "[files]",
-        "# File names inside each run folder.",
-        'lammps_log = "log.lammps"',
-        'plumed_input = "plumed.plumed"',
-        'colvar = "COLVAR"',
+        "files:",
+        "  # File names inside each run folder.",
+        "  lammps_log: log.lammps",
+        "  plumed_input: plumed.plumed",
+        "  colvar: COLVAR",
         "",
-        "# One section per collective variable. All keys are optional:",
-        "#   label     axis label used in plots",
-        "#   units     units shown next to the label",
-        "#   limits    grid range [min, max]; or set only `min` or `max`. Unset limits come",
-        "#             from the PLUMED walls, then from the data range",
-        "#   bandwidth KDE bandwidth; default: Silverman's rule",
-        "#   scale     factor applied when loading (e.g. 57.29578 for radians -> degrees)",
-        "#   source    file holding this CV when it is not in COLVAR (default: CV-<name>)",
+        "# One entry per collective variable. All keys are optional:",
+        "#   label      axis label used in plots",
+        "#   units      units shown next to the label",
+        "#   limits     grid range [min, max]; either end can be null. Unset limits come from",
+        "#              the PLUMED walls, then from the data range",
+        "#   bandwidth  KDE bandwidth; default: Silverman's rule",
+        "#   scale      factor applied when loading (e.g. 57.29578 for radians -> degrees)",
+        "#   source     file holding this CV when it is not in COLVAR (default: CV-<name>)",
+        "cv:",
     ]
     for name in cvs or ["d0"]:
-        prefix = "" if cvs else "# "
+        prefix = "  " if cvs else "  # "
         lines += [
-            "",
-            f"{prefix}[cv.{_toml_key(name)}]",
-            f'# label = "{name}"',
-            "# limits = [0.0, 1.0]",
-            "# bandwidth = 0.05",
+            f"{prefix}{_yaml.key(name)}:",
+            f"  #   label: {_yaml.scalar(name)}",
+            "  #   limits: [null, null]",
+            "  #   bandwidth: 0.05",
         ]
     lines += [
         "",
-        "[atoms]",
-        "# Atom type numbers to element symbols, and named groups of 1-based atom indices.",
-        '# type_map = { 1 = "H", 2 = "O", 3 = "Ti" }',
-        "# groups = { site_A = [311], site_B = [313, 218] }",
+        "atoms:",
+        "  # Atom type numbers to element symbols, and named groups of 1-based atom indices.",
+        "  # type_map: {1: H, 2: O, 3: Ti}",
+        "  # groups:",
+        "  #   site_A: [311]",
+        "  #   site_B: [313, 218]",
         "",
-        "[plot]",
-        'style = "paper"',
+        "plot:",
+        "  style: paper",
         "",
     ]
     return "\n".join(lines)
-
-
-def _toml_string(value: str) -> str:
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _toml_key(key: str) -> str:
-    bare = key.replace("_", "").replace("-", "").isalnum() and key.isascii()
-    return key if bare else _toml_string(key)
 
 
 def read_colvar_fields(path: Path) -> list[str]:
