@@ -393,10 +393,12 @@ Notes on what was built:
 
 **Status:** todo
 
-**Open question (ask before implementing):** the old code weights frames by the main bias only
-(`opes.bias`). The wall biases (`uwall.bias`, `lwall.bias`) are now detected
-(`RunMetadata.wall_bias_columns`) but not used. Was leaving them out deliberate? Including them
-changes the reweighted surface near the walls.
+**Decided: wall biases.** Frames are weighted by the main bias only (`opes.bias`), as in the
+old code: the walls confine the system, so the result is the free energy within the allowed
+region. An option (`include_walls=True` / `--include-walls`) adds the wall bias columns
+(`RunMetadata.wall_bias_columns`) to the bias; it fails with a clear message if COLVAR does not
+print them (add e.g. `uwall.bias` to `PRINT ARG=`). `estk cvs` should report, per run, how many
+frames are past a wall and the largest wall energy in k_BT, so the effect of the choice is visible.
 
 ### Current state
 - Two implementations exist:
