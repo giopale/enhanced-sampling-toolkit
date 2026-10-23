@@ -1,0 +1,92 @@
+# Migrated from atio2-h2o.yaml by `estk config migrate`.
+# Settings that are not facts about the system were left out; see the list printed
+# by the command.
+
+runs:
+  root: .
+  pattern: 00*
+
+cv:
+  cn:
+    limits: [0.75, null]
+    bandwidth: 0.033
+  cn_O2c:
+    limits: [0.0, 13]
+    bandwidth: 0.033
+  d0:
+    limits: [1.5, 2.5]
+    bandwidth: 0.02161725
+  dOH_min:
+    limits: [0.8, 1.1]
+  dOOliq_min:
+    limits: [2.2, 3.5]
+    bandwidth: 0.00875339
+  dOO2c_min:
+    limits: [2.2, 3.5]
+  theta1:
+    limits: [1.0, 2.5]
+    scale: 57.29577951308232
+  theta2:
+    limits: [1.0, 2.5]
+    scale: 57.29577951308232
+  thetaH_z:
+    limits: [0, 6.3]
+  Hbonds_received:
+    limits: [0, 6]
+  direct-delta:
+    limits: &deltalimits [-1.5, 1.5]
+  direct-d:
+    limits: &dlimits [2.2, 3.0]
+  indirect-delta:
+    limits: *deltalimits
+  indirect-d:
+    limits: *dlimits
+  direct-delta-A:
+    limits: *deltalimits
+  direct-d-A:
+    limits: *dlimits
+  indirect-delta-A:
+    limits: *deltalimits
+    bandwidth: 0.01730002
+  indirect-d-A:
+    limits: *dlimits
+    bandwidth: 0.00860539
+  direct-delta-B:
+    limits: *deltalimits
+  direct-d-B:
+    limits: *dlimits
+  indirect-delta-B:
+    limits: *deltalimits
+    bandwidth: 0.01730002
+  indirect-d-B:
+    limits: *dlimits
+    bandwidth: 0.00860539
+  direct-delta-liquid:
+    limits: *deltalimits
+    bandwidth: 0.01766209
+  direct-d-liquid:
+    limits: *dlimits
+    bandwidth: 0.00769627
+  indirect-delta-liquid:
+    limits: *deltalimits
+  indirect-d-liquid:
+    limits: *dlimits
+  rmse-f: {}
+
+atoms:
+  type_map:
+    1: H
+    2: O
+    3: Ti
+  groups:
+    pt_type1: [262]
+    water_oxygens: &all_water_ox [153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166,
+      167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186,
+      187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206,
+      207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261,
+      263]
+    site_A: [311]
+    site_B: [313, 218]
+    site_C: [312, 310]
+    site_D: [220]
+    site_liquid: *all_water_ox

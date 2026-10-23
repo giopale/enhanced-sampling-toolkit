@@ -1,0 +1,17 @@
+#! FIELDS time d0 cn sigma_d0 sigma_cn height
+#! SET action OPES_METAD_state
+#! SET biasfactor       22.33629589992186
+#! SET epsilon   6.995531804856374e-11
+#! SET kernel_cutoff       6.838591140180847
+#! SET compression_threshold                       1
+#! SET zed    0.007599554775500344
+#! SET sum_weights       41928.18913749992
+#! SET sum_weights2       1765323.479290045
+#! SET counter  21506
+#! SET adaptive_counter  2151400
+#! SET sigma0_d0      0.0752228792892905
+#! SET av_cv_d0       1.929269572361627
+#! SET av_M2_d0       42098.62672565501
+#! SET sigma0_cn     0.01827761298370824
+#! SET av_cv_cn       1.550565524925305
+#! SET av_M2_cn       202731.7071956816
