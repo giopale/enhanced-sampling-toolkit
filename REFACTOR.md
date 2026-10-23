@@ -409,11 +409,11 @@ and the CV values, so COLVAR does not need to print `uwall.bias`. `estk cvs` and
 k_BT.
 
 Notes on what was built:
-- **Checked against the old code.** The old `reweight_property` was run on synthetic runs laid
-  out like the real ones (walls, state file, case file `atio2-h2o.yaml`); the new per-run
-  surfaces agree with its `pot*-rew-fes.dat` files to 2e-5 kJ/mol at every grid point (the
-  files have 6 decimals), with the same grid. The same comparison runs on the real reference
-  data once `tests/data/runs` is in the repository. The kernel sum is also tested against a
+- **Checked against the old code on real runs.** `tests/data/runs` holds 4 trimmed real runs
+  and the old `reweight_property` output for them. The new per-run surfaces agree with the old
+  `pot*-rew-fes.dat` files at every grid point, with the same grid: to 2e-5 kJ/mol (the files
+  have 6 decimals) plus a relative 6e-8 from the more precise gas constant
+  (8.314462618e-3 instead of 8.3144621e-3 kJ/(mol K)). The kernel sum is also tested against a
   verbatim copy of the old `fes_kde_2d_logsum` and against a brute-force sum.
 - **Known answer.** Frames sampled from a well-tempered distribution of a known F(x, y)
   (double well, barrier 5 kT) give back F within the sampling noise (0.15 kT rms).
@@ -428,6 +428,11 @@ Notes on what was built:
   run's maximum (see section 7). Units are those of the bias (kJ/mol by default).
 - Far from the data, log p is very negative but finite (log space never underflows), as in the
   old code; only points with no frame in reach at all are `inf`.
+- **Any number of CVs.** 1D works both for runs biased along one CV and for 1D profiles of
+  2D-biased runs; the latter is the exact marginal of the 2D surface (tested). 1D and 3D+ use
+  the direct sums (fast enough in 1D).
+- **Several walls on one side of a CV** (the real input has upper walls on d0 at 2.2 and 3.0):
+  the innermost sets the grid limit; each wall is reported separately.
 - The grid is shared by all runs (needed to combine them). If the PLUMED walls differ between
   runs, the outermost positions are used, with a warning.
 - Runs are computed in parallel with `-j N` (processes). `--skip-failed` leaves out runs that

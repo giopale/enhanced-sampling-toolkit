@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import pytest
 
 from estk import units
@@ -82,6 +83,26 @@ def test_plumed_input(tmp_path):
     assert p.bias.state_file == "STATE"
     assert p.walls == {"d0": (1.5, 2.5), "cn": (None, 3.0)}
     assert p.wall_bias_columns == ["uwall.bias", "lwall.bias"]
+
+
+def test_plumed_several_walls_on_one_side(tmp_path):
+    # as in the real input: an inner and an outer upper wall on d0
+    text = (
+        "UPPER_WALLS ARG=d0 AT=2.2 KAPPA=300 EXP=2\n"
+        "LOWER_WALLS ARG=d0 AT=1.5 KAPPA=300 EXP=2\n"
+        "UPPER_WALLS ARG=d0 AT=3.0 KAPPA=300 EXP=2\n"
+        "LOWER_WALLS ARG=d0 AT=1.2 KAPPA=300\n"
+    )
+    p = read_input(write(tmp_path / "plumed.dat", text))
+    assert p.walls == {"d0": (1.5, 2.2)}  # innermost on each side
+    assert [(w.side, w.at) for w in p.wall_terms] == [
+        ("upper", 2.2),
+        ("lower", 1.5),
+        ("upper", 3.0),
+        ("lower", 1.2),
+    ]
+    wall = p.wall_terms[0]
+    assert wall.energy(np.array([2.0, 2.3]))[1] == pytest.approx(300 * 0.1**2)
 
 
 def test_plumed_include_and_braces(tmp_path):

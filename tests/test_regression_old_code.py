@@ -53,9 +53,11 @@ def test_free_energy_matches_old_code(project, old_path):
     np.testing.assert_allclose(new.grid.upper, old.grid.upper, atol=1e-3)
 
     # The old files hold -kT log p (weights normalised to 1, not shifted), written with 6
-    # decimals; compare after shifting both minima to 0.
+    # decimals; compare after shifting both minima to 0. The old code used k_B = 0.0083144621
+    # kJ/(mol K), estk the CODATA value 0.008314462618: F differs by a factor 1 + 6e-8, which
+    # is visible (2e-5 kJ/mol) only where F is several hundred kJ/mol.
     old_values = old.values - np.min(old.values[np.isfinite(old.values)])
     finite = np.isfinite(old_values)
     assert np.array_equal(finite, np.isfinite(new.values))
-    np.testing.assert_allclose(new.values[finite], old_values[finite], atol=2e-5, rtol=0)
+    np.testing.assert_allclose(new.values[finite], old_values[finite], atol=2e-5, rtol=1e-7)
     assert new.metadata["fes_offset"] == pytest.approx(np.min(old.values[finite]), abs=2e-5)

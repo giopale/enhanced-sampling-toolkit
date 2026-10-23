@@ -86,7 +86,8 @@ class PlumedInput:
     """The settings of a PLUMED input that matter for analysis.
 
     ``walls`` maps a CV name to ``(lower, upper)`` positions of its LOWER/UPPER_WALLS (None when
-    that side has no wall). Units are PLUMED's (``time_units``, ``energy_units``).
+    that side has no wall; with several walls on one side, the innermost). ``wall_terms`` lists
+    every wall. Units are PLUMED's (``time_units``, ``energy_units``).
     """
 
     path: Path
@@ -151,7 +152,12 @@ def _read_walls(action: Action, plumed: PlumedInput, path: Path) -> None:
     for i, (arg, value) in enumerate(zip(args, at, strict=True)):
         position = _to_float(value, path, "AT")
         limits = list(plumed.walls.get(arg, (None, None)))
-        limits[side] = position
+        # Several walls on the same side: the innermost one confines the system.
+        if limits[side] is None:
+            limits[side] = position
+        else:
+            pick = max if side == 0 else min
+            limits[side] = pick(limits[side], position)
         plumed.walls[arg] = (limits[0], limits[1])
         wall = Wall(cv=arg, side="lower" if side == 0 else "upper", at=position, label=action.label)
         wall.kappa = per_arg["KAPPA"][i]

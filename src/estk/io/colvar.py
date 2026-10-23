@@ -118,16 +118,20 @@ class LoadReport:
     nan: dict[str, int] = field(default_factory=dict)  # column -> rows dropped for NaN
     filtered: int = 0
     rows: int = 0
-    # "<cv> upper/lower" -> (frames past the wall, largest wall energy in k_BT or None)
+    # "<cv> upper/lower <AT>" -> (frames past the wall, largest wall energy in k_BT or None)
     walls: dict[str, tuple[int, float | None]] = field(default_factory=dict)
     walls_in_bias: bool = False
 
     def wall_summary(self) -> str:
-        """Frames past each wall, e.g. ``d0 upper: 12 frames, max 3.1 kT``."""
+        """Walls crossed by some frames, e.g. ``d0 upper 2.2: 12 frames, max 3.1 kT``.
+
+        Empty if no frame is past any wall of the loaded CVs.
+        """
         parts = []
         for name, (n, max_kbt) in self.walls.items():
-            energy = f", max {max_kbt:.3g} kT" if max_kbt is not None and n else ""
-            parts.append(f"{name}: {n} frames{energy}")
+            if n:
+                energy = f", max {max_kbt:.3g} kT" if max_kbt is not None else ""
+                parts.append(f"{name}: {n} frames{energy}")
         return "; ".join(parts)
 
     def summary(self) -> str:
@@ -309,7 +313,7 @@ def load_cv_table(
     wall_energy: dict[str, np.ndarray | None] = {}
     for wall in walls:
         if wall.cv in columns:
-            name = f"{wall.cv} {wall.side}"
+            name = f"{wall.cv} {wall.side} {wall.at:g}"
             wall_past[name] = wall.past(columns[wall.cv])
             wall_energy[name] = wall.energy(columns[wall.cv]) if wall.kappa is not None else None
     if include_walls and bias_values is not None and walls:

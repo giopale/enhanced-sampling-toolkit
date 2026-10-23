@@ -286,6 +286,60 @@ def test_parallel_gives_same_result(biased_project):
         np.testing.assert_array_equal(serial.surfaces[name].values, parallel.surfaces[name].values)
 
 
+# --- 1D surfaces -------------------------------------------------------------------------------
+
+
+def test_1d_surface_from_1d_bias(tmp_path):
+    """OPES on one CV: the 1D reweighted surface recovers that CV's free energy."""
+    rng = np.random.default_rng(3)
+    n, gamma = 100_000, 10.0
+    axis = np.linspace(1.3, 2.7, 4001)
+    x = sample(fx(axis), axis, rng, n, gamma)
+    folder = tmp_path / "000"
+    folder.mkdir()
+    (folder / "log.lammps").write_text(LAMMPS_LOG)
+    (folder / "plumed.plumed").write_text(
+        "opes: OPES_METAD ARG=d0 PACE=500 BARRIER=30 BIASFACTOR=10\n"
+    )
+    bias = -(1 - 1 / gamma) * fx(x)
+    np.savetxt(
+        folder / "COLVAR",
+        np.column_stack([np.arange(n) * 0.05, x, bias]),
+        fmt="%.6f",
+        header="FIELDS time d0 opes.bias",
+        comments="#! ",
+    )
+    (tmp_path / "estk.yaml").write_text(
+        "runs:\n  pattern: '0*'\ncv:\n  d0:\n    limits: [1.5, 2.5]\n    bandwidth: 0.01\n"
+    )
+    result = Project(tmp_path / "estk.yaml").reweight(["d0"], points=81)
+    surface = result.surfaces["000"]
+    (axis_d0,) = result.grid.axes()
+    true = fx(axis_d0) - fx(axis_d0).min()
+    low = true < 3 * KBT_350
+    error = (surface.values - true)[low]
+    error -= error.mean()
+    assert surface.values.shape == (81,)
+    assert np.sqrt(np.mean(error**2)) < 0.1 * KBT_350
+
+    path = surface.save(tmp_path / "d0.dat")
+    assert Surface.load(path).grid == result.grid
+
+
+def test_1d_surface_from_2d_bias_is_the_marginal(biased_project):
+    """From a 2D-biased run, the 1D surface equals the 2D one integrated over the other CV."""
+    one_d = biased_project.reweight(["d0"], points=41).surfaces["000"]
+    # 2D grid wide and fine enough in cn that the kernel sums over cn are exact integrals
+    two_d = biased_project.reweight(
+        ["d0", "cn"], points=(41, 601), limits={"cn": (-0.5, 3.5)}
+    ).surfaces["000"]
+    kbt = KBT_350
+    marginal = -kbt * np.log(np.sum(np.exp(-two_d.values / kbt), axis=1))
+    marginal -= marginal.min()
+    np.testing.assert_allclose(one_d.values, marginal, atol=1e-6)
+    assert one_d.metadata["log_weight_total"] == two_d.metadata["log_weight_total"]
+
+
 # --- walls ------------------------------------------------------------------------------------
 
 
@@ -302,10 +356,10 @@ def test_walls_report_and_include(tmp_path):
     project.config.runs.pattern = "0*"
 
     table = project.runs[0].load_cvs(["d0"])
-    n, max_kbt = table.report.walls["d0 upper"]
+    n, max_kbt = table.report.walls["d0 upper 2.5"]
     assert n == 2
     assert max_kbt == pytest.approx(1000 * 0.2**2 / KBT_350)
-    assert table.report.walls["d0 lower"] == (0, None)
+    assert table.report.walls["d0 lower 1.5"] == (0, None)
     np.testing.assert_allclose(table.bias, 0.0)
 
     with_walls = project.runs[0].load_cvs(["cn"], include_walls=True)

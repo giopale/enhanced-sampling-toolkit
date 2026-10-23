@@ -177,7 +177,7 @@ def cvs(
 @app.command()
 @handle_errors
 def reweight(
-    names: Annotated[list[str], typer.Argument(help="CVs of the grid, e.g. d0 cn.")],
+    names: Annotated[list[str], typer.Argument(help="CVs of the grid: one (d0) or more (d0 cn).")],
     prop: Annotated[
         str | None,
         typer.Option("--property", help="Average this quantity instead of the free energy."),
