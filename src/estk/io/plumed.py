@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from estk.errors import EstError, MissingFileError
 from estk.logging import get_logger
 
@@ -48,6 +50,38 @@ class Bias:
 
 
 @dataclass
+class Wall:
+    """One CV's term of an UPPER_WALLS / LOWER_WALLS action.
+
+    The energy is ``kappa * ((s - at ± offset) / eps) ** exp`` past the wall and 0 elsewhere,
+    as in PLUMED (``+offset`` for upper walls, ``-offset`` for lower walls).
+    """
+
+    cv: str
+    side: str  # "upper" or "lower"
+    at: float
+    kappa: float | None = None
+    exp: float = 2.0
+    eps: float = 1.0
+    offset: float = 0.0
+    label: str | None = None
+
+    def past(self, values: np.ndarray) -> np.ndarray:
+        """True where ``values`` are past the wall."""
+        if self.side == "upper":
+            return values - self.at + self.offset > 0
+        return values - self.at - self.offset < 0
+
+    def energy(self, values: np.ndarray) -> np.ndarray:
+        """Wall energy for the CV ``values``, in PLUMED energy units."""
+        if self.kappa is None:
+            raise EstError(f"wall on {self.cv} has no KAPPA; can't compute its energy")
+        shift = self.offset if self.side == "upper" else -self.offset
+        scaled = np.abs((values - self.at + shift) / self.eps)
+        return np.where(self.past(values), self.kappa * scaled**self.exp, 0.0)
+
+
+@dataclass
 class PlumedInput:
     """The settings of a PLUMED input that matter for analysis.
 
@@ -61,6 +95,7 @@ class PlumedInput:
     energy_units: str = "kj/mol"
     biases: list[Bias] = field(default_factory=list)
     walls: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
+    wall_terms: list[Wall] = field(default_factory=list)
     wall_bias_columns: list[str] = field(default_factory=list)
 
     @property
@@ -110,12 +145,30 @@ def _read_walls(action: Action, plumed: PlumedInput, path: Path) -> None:
     if len(args) != len(at):
         raise EstError(f"{path}: {action.name} has {len(args)} ARG but {len(at)} AT values")
     side = 0 if action.name == "LOWER_WALLS" else 1
-    for arg, value in zip(args, at, strict=True):
+    per_arg = {
+        key: _per_arg(action, key, len(args), path) for key in ("KAPPA", "EXP", "EPS", "OFFSET")
+    }
+    for i, (arg, value) in enumerate(zip(args, at, strict=True)):
+        position = _to_float(value, path, "AT")
         limits = list(plumed.walls.get(arg, (None, None)))
-        limits[side] = _to_float(value, path, "AT")
+        limits[side] = position
         plumed.walls[arg] = (limits[0], limits[1])
+        wall = Wall(cv=arg, side="lower" if side == 0 else "upper", at=position, label=action.label)
+        wall.kappa = per_arg["KAPPA"][i]
+        for key, default in (("EXP", 2.0), ("EPS", 1.0), ("OFFSET", 0.0)):
+            setattr(wall, key.lower(), default if per_arg[key][i] is None else per_arg[key][i])
+        plumed.wall_terms.append(wall)
     if action.label:
         plumed.wall_bias_columns.append(f"{action.label}.bias")
+
+
+def _per_arg(action: Action, key: str, n: int, path: Path) -> list[float | None]:
+    values = action.get_list(key)
+    if not values:
+        return [None] * n
+    if len(values) != n:
+        raise EstError(f"{path}: {action.name} has {n} ARG but {len(values)} {key} values")
+    return [_to_float(v, path, key) for v in values]
 
 
 def read_state_bias_factor(path: Path) -> float | None:

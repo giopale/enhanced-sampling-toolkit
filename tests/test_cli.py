@@ -121,3 +121,31 @@ def test_cvs_unknown(workdir):
     result = run("cvs", "nope")
     assert result.exit_code == 1
     assert "CV-nope" in result.output
+
+
+def test_reweight(workdir):
+    make_run(workdir / "000")
+    make_run(workdir / "001")
+    (workdir / "estk.yaml").write_text("runs:\n  pattern: '0*'\n")
+    result = run(
+        "reweight", "d0", "cn", "--points", "11,9", "--limits", "cn=0,", "--bandwidth", "d0=0.05"
+    )
+    assert result.exit_code == 0, result.output
+    assert "grid cn: 0 (command line) to 3 (PLUMED walls), 9 points" in result.output
+    from estk.surface import Surface
+
+    surface = Surface.load(workdir / "reweight-d0-cn" / "000.dat")
+    assert surface.grid.points == (11, 9)
+    assert surface.metadata["run"] == "000"
+    assert surface.metadata["bandwidth"]["d0"] == 0.05
+    assert surface.metadata["bandwidth_source"]["d0"] == "command line"
+
+
+def test_reweight_bad_options(workdir):
+    make_run(workdir / "000")
+    result = run("reweight", "d0", "cn", "--limits", "cn=0.5")
+    assert result.exit_code == 1
+    assert "--limits: expected e.g. d0=1.5,2.5" in result.output
+    result = run("reweight", "d0", "cn", "--points", "ten")
+    assert result.exit_code == 1
+    assert "--points" in result.output

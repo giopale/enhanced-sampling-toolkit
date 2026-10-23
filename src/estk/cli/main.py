@@ -156,14 +156,141 @@ def cvs(
     from estk.project import Project
 
     project = Project(load_config(_state["config"]))
-    table = Table("run", "rows", "time (ns)", *names, "notes")
+    table = Table("run", "rows", "time (ns)", *names, "past walls", "notes")
     for run in project.runs:
         data = run.load_cvs(names, time=time, bias=False)
         ranges = [f"{data[n].min():.4g} – {data[n].max():.4g}" for n in names]
         span = f"{data.time[0] / 1000:.3g} – {data.time[-1] / 1000:.3g}"
         notes = data.report.summary().split(", ", 1)
-        table.add_row(run.name, str(len(data)), span, *ranges, notes[1] if len(notes) > 1 else "")
+        walls = data.report.wall_summary() or "-"
+        table.add_row(
+            run.name,
+            str(len(data)),
+            span,
+            *ranges,
+            walls,
+            notes[1] if len(notes) > 1 else "",
+        )
     console.print(table)
+
+
+@app.command()
+@handle_errors
+def reweight(
+    names: Annotated[list[str], typer.Argument(help="CVs of the grid, e.g. d0 cn.")],
+    prop: Annotated[
+        str | None,
+        typer.Option("--property", help="Average this quantity instead of the free energy."),
+    ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(help="File holding --property when it is not a CV (e.g. model_devi.out)."),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None,
+        typer.Option(help="Time window in ns, e.g. --time 0 20 (use inf for no end)."),
+    ] = None,
+    points: Annotated[
+        str, typer.Option(help="Grid points: one number for all CVs, or one per CV (100,80).")
+    ] = "100",
+    limits: Annotated[
+        list[str] | None,
+        typer.Option(help="Grid limits of a CV, e.g. --limits d0=1.5,2.5 or cn=0.75, (repeat)."),
+    ] = None,
+    bandwidth: Annotated[
+        list[str] | None,
+        typer.Option(help="Kernel bandwidth of a CV, e.g. --bandwidth d0=0.02 (repeat)."),
+    ] = None,
+    include_walls: Annotated[
+        bool, typer.Option("--include-walls", help="Add the PLUMED wall energies to the bias.")
+    ] = False,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="Runs computed in parallel.")] = 1,
+    skip_failed: Annotated[
+        bool, typer.Option("--skip-failed", help="Leave out runs that fail instead of stopping.")
+    ] = False,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output", "-o", help="Output folder (default: reweight-<cvs>[-<property>])."
+        ),
+    ] = None,
+) -> None:
+    """Reweight every run to a free-energy surface (or property average) on a common grid.
+
+    Writes one file per run, <output>/<run>.dat, in PLUMED grid format.
+    """
+    from estk.project import Project
+
+    project = Project(load_config(_state["config"]))
+    result = project.reweight(
+        names,
+        quantity=prop,
+        source=source,
+        time=time,
+        points=_parse_points(points),
+        limits=_parse_assignments(limits, "limits", pair=True),
+        bandwidth=_parse_assignments(bandwidth, "bandwidth", pair=False),
+        include_walls=include_walls,
+        jobs=jobs,
+        skip_failed=skip_failed,
+    )
+    folder = output or Path("reweight-" + "-".join([*names, *([prop] if prop else [])]))
+    paths = result.save(folder)
+
+    grid = result.grid
+    for name, lo, hi, n in zip(grid.names, grid.lower, grid.upper, grid.points, strict=True):
+        src_lo, src_hi = result.limit_sources[name]
+        console.print(f"grid {name}: {lo:g} ({src_lo}) to {hi:g} ({src_hi}), {n} points")
+    table = Table("run", "frames", "effective", *[f"h({n})" for n in names], "past walls")
+    for run_name, surface in result.surfaces.items():
+        meta = surface.metadata
+        report = result.tables[run_name].report
+        table.add_row(
+            run_name,
+            str(meta["frames"]),
+            f"{meta['effective_frames']:.0f}",
+            *[f"{meta['bandwidth'][n]:.4g} ({meta['bandwidth_source'][n]})" for n in names],
+            report.wall_summary() or "-",
+        )
+    console.print(table)
+    if include_walls:
+        console.print("wall energies are included in the bias")
+    for run_name, reason in result.failed.items():
+        err_console.print(f"[yellow]skipped {run_name}:[/yellow] {reason}", highlight=False)
+    console.print(f"wrote {len(paths)} file(s) to {folder}/")
+
+
+def _parse_points(text: str) -> int | list[int]:
+    try:
+        values = [int(v) for v in text.split(",")]
+    except ValueError:
+        raise EstError(f"--points: expected integers like 100 or 100,80, got {text!r}") from None
+    return values[0] if len(values) == 1 else values
+
+
+def _parse_assignments(
+    items: list[str] | None, option: str, *, pair: bool
+) -> dict[str, Any] | None:
+    """Parse ``NAME=value`` (or ``NAME=lo,hi`` with ``pair``; either side may be empty)."""
+    if not items:
+        return None
+    parsed: dict[str, Any] = {}
+    for item in items:
+        name, sep, value = item.partition("=")
+        try:
+            if not sep or not name:
+                raise ValueError
+            if pair:
+                lo, comma, hi = value.partition(",")
+                if not comma:
+                    raise ValueError
+                parsed[name] = (float(lo) if lo else None, float(hi) if hi else None)
+            else:
+                parsed[name] = float(value)
+        except ValueError:
+            example = "d0=1.5,2.5" if pair else "d0=0.02"
+            raise EstError(f"--{option}: expected e.g. {example}, got {item!r}") from None
+    return parsed
 
 
 def _fmt(value: float | None) -> str:

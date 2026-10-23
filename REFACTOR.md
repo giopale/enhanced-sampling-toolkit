@@ -136,10 +136,10 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 3 | [Logging and error handling](#3-logging-and-error-handling) | done |
 | 4 | [Run discovery and simulation metadata](#4-run-discovery-and-simulation-metadata) | done |
 | 5 | [CV data loading](#5-cv-data-loading) | done |
-| 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | todo |
+| 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | done |
 | 7 | [Combining runs](#7-combining-runs) | todo |
-| 8 | [Bandwidth selection](#8-bandwidth-selection) | todo |
-| 9 | [Surface file format](#9-surface-file-format) | todo |
+| 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
+| 9 | [Surface file format](#9-surface-file-format) | in progress |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | todo |
 | 11 | [Barrier convergence](#11-barrier-convergence) | todo |
 | 12 | [Surface plotting](#12-surface-plotting) | todo |
@@ -391,14 +391,49 @@ Notes on what was built:
 
 ## 6. Frame weights and KDE reweighting
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/grid.py` (`Grid`, `resolve_limits`), `src/estk/reweight/` (`kde_on_grid`,
+`reweight_table`, `reweight`, `silverman`), `src/estk/surface.py`, `Project.reweight`, and
+`estk reweight CV... [--property Q [--source FILE]] [--time A B] [--points N[,M]]
+[--limits CV=LO,HI] [--bandwidth CV=H] [--include-walls] [-j N] [--skip-failed] [-o DIR]`,
+which writes `<DIR>/<run>.dat` per run. Tested in `tests/test_reweight.py`;
+`tests/test_regression_old_code.py` compares with the old `pot*-rew-fes.dat` files.
 
 **Decided: wall biases.** Frames are weighted by the main bias only (`opes.bias`), as in the
 old code: the walls confine the system, so the result is the free energy within the allowed
-region. An option (`include_walls=True` / `--include-walls`) adds the wall bias columns
-(`RunMetadata.wall_bias_columns`) to the bias; it fails with a clear message if COLVAR does not
-print them (add e.g. `uwall.bias` to `PRINT ARG=`). `estk cvs` should report, per run, how many
-frames are past a wall and the largest wall energy in k_BT, so the effect of the choice is visible.
+region. `include_walls=True` / `--include-walls` adds the wall energies to the bias. They are
+computed from the wall definitions in the PLUMED input (`AT`, `KAPPA`, `EXP`, `EPS`, `OFFSET`)
+and the CV values, so COLVAR does not need to print `uwall.bias`. `estk cvs` and
+`estk reweight` report, per run and wall, the frames past the wall and the largest wall energy in
+k_BT.
+
+Notes on what was built:
+- **Checked against the old code.** The old `reweight_property` was run on synthetic runs laid
+  out like the real ones (walls, state file, case file `atio2-h2o.yaml`); the new per-run
+  surfaces agree with its `pot*-rew-fes.dat` files to 2e-5 kJ/mol at every grid point (the
+  files have 6 decimals), with the same grid. The same comparison runs on the real reference
+  data once `tests/data/runs` is in the repository. The kernel sum is also tested against a
+  verbatim copy of the old `fes_kde_2d_logsum` and against a brute-force sum.
+- **Known answer.** Frames sampled from a well-tempered distribution of a known F(x, y)
+  (double well, barrier 5 kT) give back F within the sampling noise (0.15 kT rms).
+- **Speed.** For a diagonal bandwidth on a 2D grid the Gaussian kernel factorises, so the sums
+  are matrix products: about 30x faster than the old code (0.4 s instead of 11 s for 20 000
+  frames on 100x100). Grid points so far from all frames that the factorised sums underflow are
+  recomputed with the direct log-space sums, so the results match there too. Other cases (full
+  bandwidth matrix, 1 or 3+ CVs) use the direct sums.
+- **Output values.** Free energies are shifted so the minimum is 0; the removed constant is
+  `fes_offset` in the file header (values + offset = -kT log p with weights normalised to 1, as
+  in the old per-run files). `log_weight_total` is now log Σ exp(V/kT) **without** subtracting the
+  run's maximum (see section 7). Units are those of the bias (kJ/mol by default).
+- Far from the data, log p is very negative but finite (log space never underflows), as in the
+  old code; only points with no frame in reach at all are `inf`.
+- The grid is shared by all runs (needed to combine them). If the PLUMED walls differ between
+  runs, the outermost positions are used, with a warning.
+- Runs are computed in parallel with `-j N` (processes). `--skip-failed` leaves out runs that
+  fail and lists them.
+- `calc_c_of_t` and the rest of `ectoolkits_reweight.py` were not ported (not used by the
+  current commands).
 
 ### Current state
 - Two implementations exist:
@@ -458,6 +493,8 @@ frames are past a wall and the largest wall energy in k_BT, so the effect of the
 - Free energies are averaged directly. Averaging probabilities (then taking `-kT log`) is the
   standard choice and is consistent with weighting by total bias weight.
 - The standard deviation column is unweighted while the mean is weighted.
+- `read_fes` also shifts the standard deviation column so that its minimum is 0, which distorts
+  the error bars of the `-AVG` file when it is read back.
 - The comment says the factor `0.0103636` converts "to J/mol"; dividing by it converts eV to
   kJ/mol.
 - Results go through text files and are read back instead of being kept in memory.
@@ -479,7 +516,13 @@ frames are past a wall and the largest wall energy in k_BT, so the effect of the
 
 ## 8. Bandwidth selection
 
-**Status:** todo
+**Status:** in progress
+
+**Done:** `estk.reweight.silverman` (same formula as the old code, which is checked in a test;
+`ndim` is the number of CVs instead of a hard-coded 2; `weighted_std=True` is available) and
+`effective_sample_size`. Bandwidths: `--bandwidth` > `cv.<name>.bandwidth` in estk.yaml >
+Silverman, recorded with their source in each surface's metadata.
+**Left:** SCV and the `estk bandwidth` command.
 
 ### Current state
 - `compute_bw_silverman` (in `ectoolkits_reweight.py`) uses Silverman's rule with the effective
@@ -509,7 +552,14 @@ frames are past a wall and the largest wall energy in k_BT, so the effect of the
 
 ## 9. Surface file format
 
-**Status:** todo
+**Status:** in progress
+
+**Done:** `Surface` (one class for free energies and property averages, with `quantity`,
+`units`, `error`, `metadata`) and `src/estk/io/grids.py`. Instead of HDF5, the files are
+PLUMED-style text grids (first CV fastest, blank line between sweeps) with the metadata as
+`#! SET estk.<key> <JSON>` header lines: readable, diff-able, no extra dependency, and the
+reader also loads the old `pot*`/`-AVG` files (any row order). Units stay those of the bias.
+**Left:** path (MEP) files with section 10; `--units eV` for display.
 
 ### Current state
 - `write_fes` writes a PLUMED-like text grid: a `FIELDS` line, `SET min_/max_/num_grid_points_`

@@ -118,6 +118,17 @@ class LoadReport:
     nan: dict[str, int] = field(default_factory=dict)  # column -> rows dropped for NaN
     filtered: int = 0
     rows: int = 0
+    # "<cv> upper/lower" -> (frames past the wall, largest wall energy in k_BT or None)
+    walls: dict[str, tuple[int, float | None]] = field(default_factory=dict)
+    walls_in_bias: bool = False
+
+    def wall_summary(self) -> str:
+        """Frames past each wall, e.g. ``d0 upper: 12 frames, max 3.1 kT``."""
+        parts = []
+        for name, (n, max_kbt) in self.walls.items():
+            energy = f", max {max_kbt:.3g} kT" if max_kbt is not None and n else ""
+            parts.append(f"{name}: {n} frames{energy}")
+        return "; ".join(parts)
 
     def summary(self) -> str:
         parts = [f"{self.rows}/{self.rows_colvar} rows kept"]
@@ -173,6 +184,7 @@ def load_cv_table(
     extra: Mapping[str, str | Path] | None = None,
     filters: Mapping[str, tuple[float | None, float | None]] | None = None,
     bias: bool = True,
+    include_walls: bool = False,
 ) -> CVTable:
     """Load the CVs of one run, joined on time.
 
@@ -194,6 +206,12 @@ def load_cv_table(
         in ``cvs`` or ``extra`` are loaded for filtering only.
     bias:
         Also load the bias column (needed for reweighting).
+    include_walls:
+        Add the energy of the PLUMED walls to the bias. It is computed from the wall
+        definitions (AT, KAPPA, EXP, EPS, OFFSET) and the values of the walled CVs, which are
+        loaded for this purpose if needed.
+
+    The frames past each wall of a loaded CV are counted in ``report.walls`` in any case.
     """
     meta = run.metadata
     config = run.config
@@ -218,9 +236,19 @@ def load_cv_table(
         wanted[name] = None if colvar.has(name) else run.path / _cv_source(name, config)
     for name, path in (extra or {}).items():
         wanted[name] = run.path / Path(path)
+    hidden = set()  # columns loaded only for filters or walls
     for name in filters or {}:
         if name not in wanted:
             wanted[name] = None if colvar.has(name) else run.path / _cv_source(name, config)
+            hidden.add(name)
+    walls = meta.wall_terms
+    if include_walls and bias:
+        for wall in walls:
+            if wall.cv not in wanted:
+                wanted[wall.cv] = (
+                    None if colvar.has(wall.cv) else run.path / _cv_source(wall.cv, config)
+                )
+                hidden.add(wall.cv)
 
     bias_column = meta.bias_column
     if bias:
@@ -238,7 +266,15 @@ def load_cv_table(
     # Read the other files and join them on time.
     other_tables: dict[Path, Table] = {}
     for path in {p for p in wanted.values() if p is not None}:
-        other_tables[path] = read_table(path)
+        try:
+            other_tables[path] = read_table(path)
+        except MissingFileError:
+            needed_by = [n for n, p in wanted.items() if p == path]
+            if any(n in hidden and n not in (filters or {}) for n in needed_by):
+                raise MissingFileError(
+                    f"{path} not found: needed for the energy of the wall on {', '.join(needed_by)}"
+                ) from None
+            raise
 
     selection = np.arange(len(keys))  # rows of the (deduplicated) COLVAR still kept
     joined: dict[Path, np.ndarray] = {}  # file -> its row for each kept COLVAR row
@@ -267,6 +303,21 @@ def load_cv_table(
             take(table, name, _column_in(table, name), joined[path])
     time_ps = time_ps[selection]
     bias_values = colvar.column(bias_column)[rows] if bias and bias_column else None
+
+    # Walls act on the unscaled CVs, so they are evaluated before scaling.
+    wall_past: dict[str, np.ndarray] = {}
+    wall_energy: dict[str, np.ndarray | None] = {}
+    for wall in walls:
+        if wall.cv in columns:
+            name = f"{wall.cv} {wall.side}"
+            wall_past[name] = wall.past(columns[wall.cv])
+            wall_energy[name] = wall.energy(columns[wall.cv]) if wall.kappa is not None else None
+    if include_walls and bias_values is not None and walls:
+        missing_kappa = [n for n, e in wall_energy.items() if e is None]
+        if missing_kappa:
+            raise EstError(f"{run.name}: no KAPPA for the wall(s) {', '.join(missing_kappa)}")
+        bias_values = bias_values + sum(e for e in wall_energy.values() if e is not None)
+        report.walls_in_bias = True
 
     # Scale CVs as set in estk.yaml (e.g. radians -> degrees).
     for name in columns:
@@ -298,7 +349,16 @@ def load_cv_table(
         report.filtered += int(np.count_nonzero(keep & ~inside))
         keep &= inside
 
-    for name in filters or {}:
+    kbt = meta.kbt if meta.temperature is not None else None
+    for name, past in wall_past.items():
+        n_past = int(np.count_nonzero(past & keep))
+        energy = wall_energy[name]
+        max_kbt = None
+        if energy is not None and kbt is not None and n_past:
+            max_kbt = float(np.max(energy[keep])) / kbt
+        report.walls[name] = (n_past, max_kbt)
+
+    for name in hidden:
         if name not in cvs and name not in (extra or {}):
             columns.pop(name)
     report.rows = int(np.count_nonzero(keep))
@@ -310,7 +370,7 @@ def load_cv_table(
         time=time_ps[keep],
         columns={name: values[keep] for name, values in columns.items()},
         bias=bias_values[keep] if bias_values is not None else None,
-        kbt=meta.kbt if meta.temperature is not None else None,
+        kbt=kbt,
         energy_units=meta.energy_units,
         report=report,
     )

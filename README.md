@@ -4,8 +4,8 @@ Tools for analysing MD + enhanced sampling simulations (LAMMPS + PLUMED/OPES): r
 free-energy surfaces, minimum-energy paths, barrier convergence and structure extraction.
 
 The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
-for the plan and the status of each part. At this stage the project configuration, reading the
-simulation settings and loading CV data are in place.
+for the plan and the status of each part. At this stage the configuration, reading the simulation
+settings, loading CV data and per-run reweighting are in place; combining runs is next.
 
 ## Install
 
@@ -24,7 +24,8 @@ estk init --pattern '00*'    # writes estk.yaml, with an entry for each CV found
 estk config show             # settings in effect and where each one comes from
 estk config validate         # check estk.yaml after editing it
 estk runs                    # temperature, timestep, bias, walls... read for each run
-estk cvs d0 cn --time 0 20   # rows kept and range of each CV per run, 0-20 ns
+estk cvs d0 cn --time 0 20   # rows kept, CV ranges and frames past walls, per run
+estk reweight d0 cn -j 4     # free-energy surface of each run -> reweight-d0-cn/<run>.dat
 ```
 
 From Python:
@@ -35,6 +36,9 @@ from estk import Project
 project = Project()                      # uses the nearest estk.yaml
 tables = project.load_cvs(["d0", "cn"], time=(0, 20))
 tables[0]["d0"], tables[0].bias, tables[0].kbt
+
+result = project.reweight(["d0", "cn"], time=(0, 20))
+fes = result.surfaces["000"]           # .grid, .values (kJ/mol, min 0), .metadata
 ```
 
 Coming from the old Hydra configuration:

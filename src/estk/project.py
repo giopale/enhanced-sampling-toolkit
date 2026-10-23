@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from estk import units
 from estk.config import ProjectConfig, SimulationConfig, load_config
@@ -14,6 +15,9 @@ from estk.errors import EstError, MissingFileError
 from estk.io import lammps, plumed
 from estk.io.colvar import CVTable, load_cv_table
 from estk.logging import get_logger
+
+if TYPE_CHECKING:
+    from estk.reweight import ReweightResult
 
 log = get_logger(__name__)
 
@@ -34,6 +38,7 @@ class RunMetadata:
     time_units: str = "ps"  # PLUMED units of COLVAR time
     energy_units: str = "kj/mol"  # PLUMED units of the bias
     walls: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
+    wall_terms: list[plumed.Wall] = field(default_factory=list)
     wall_bias_columns: list[str] = field(default_factory=list)
     sources: dict[str, str] = field(default_factory=dict)
 
@@ -78,6 +83,7 @@ def read_run_metadata(
         meta.time_units = info_p.time_units
         meta.energy_units = info_p.energy_units
         meta.walls = info_p.walls
+        meta.wall_terms = info_p.wall_terms
         meta.wall_bias_columns = info_p.wall_bias_columns
         bias = info_p.bias
         if bias is not None:
@@ -139,9 +145,18 @@ class Run:
         extra: Mapping[str, str | Path] | None = None,
         filters: Mapping[str, tuple[float | None, float | None]] | None = None,
         bias: bool = True,
+        include_walls: bool = False,
     ) -> CVTable:
         """Load CVs joined on time; see ``estk.io.colvar.load_cv_table``."""
-        return load_cv_table(self, cvs, time=time, extra=extra, filters=filters, bias=bias)
+        return load_cv_table(
+            self,
+            cvs,
+            time=time,
+            extra=extra,
+            filters=filters,
+            bias=bias,
+            include_walls=include_walls,
+        )
 
     def __repr__(self) -> str:
         return f"Run({self.name!r})"
@@ -195,12 +210,26 @@ class Project:
         extra: Mapping[str, str | Path] | None = None,
         filters: Mapping[str, tuple[float | None, float | None]] | None = None,
         bias: bool = True,
+        include_walls: bool = False,
     ) -> list[CVTable]:
         """Load the CVs of every run; see ``estk.io.colvar.load_cv_table``."""
         return [
-            run.load_cvs(cvs, time=time, extra=extra, filters=filters, bias=bias)
+            run.load_cvs(
+                cvs,
+                time=time,
+                extra=extra,
+                filters=filters,
+                bias=bias,
+                include_walls=include_walls,
+            )
             for run in self.runs
         ]
+
+    def reweight(self, cvs: Sequence[str], **options: Any) -> ReweightResult:
+        """Reweight every run onto a common grid; see ``estk.reweight.reweight``."""
+        from estk.reweight import reweight
+
+        return reweight(self, cvs, **options)
 
     def __repr__(self) -> str:
         where = self.config.path or "defaults"
