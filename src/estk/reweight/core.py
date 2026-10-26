@@ -15,7 +15,7 @@ from estk.errors import EstError
 from estk.grid import Grid, Limits, resolve_limits
 from estk.io.colvar import CVTable
 from estk.logging import get_logger
-from estk.reweight.bandwidth import effective_sample_size, silverman
+from estk.reweight.bandwidth import effective_sample_size, scv, silverman
 from estk.reweight.combine import combine as combine_surfaces
 from estk.reweight.kde import kde_on_grid
 from estk.surface import Surface
@@ -27,6 +27,10 @@ log = get_logger(__name__)
 
 DEFAULT_POINTS = 100
 COMBINED_STEM = "combined"  # <folder>/combined.dat
+# "scv": smoothed cross-validation on the biased frames, all equal; "scv-weighted": on the
+# reweighted frames (fits the unbiased density, but oversmooths the barrier regions; see
+# estk.reweight.bandwidth.scv).
+BANDWIDTH_METHODS = ("silverman", "scv", "scv-weighted")
 
 
 def log_weights(bias: np.ndarray, kbt: float) -> np.ndarray:
@@ -50,16 +54,33 @@ def choose_bandwidths(
     explicit: Mapping[str, float] | None = None,
     configured: Mapping[str, float | None] | None = None,
     bias_factor: float | None = None,
+    method: str | None = None,
 ) -> tuple[np.ndarray, dict[str, str]]:
-    """Bandwidth of each CV: ``explicit`` > ``configured`` (estk.yaml) > Silverman's rule."""
+    """Bandwidth of each CV.
+
+    Without ``method``: ``explicit`` > ``configured`` (estk.yaml) > Silverman's rule. With
+    ``method`` (one of ``BANDWIDTH_METHODS``): ``explicit`` > ``method``, so the values in
+    estk.yaml are not used. SCV is computed jointly over all the CVs of the grid.
+    """
+    if method is not None and method not in BANDWIDTH_METHODS:
+        raise EstError(
+            f"unknown bandwidth method '{method}' (choose from {', '.join(BANDWIDTH_METHODS)})"
+        )
+    joint: np.ndarray | None = None
     values, sources = [], {}
-    for name in cvs:
+    for k, name in enumerate(cvs):
         if explicit and explicit.get(name) is not None:
             values.append(float(explicit[name]))
             sources[name] = "command line"
-        elif configured and configured.get(name) is not None:
+        elif method is None and configured and configured.get(name) is not None:
             values.append(float(configured[name]))  # type: ignore[arg-type]
             sources[name] = "estk.yaml"
+        elif method in ("scv", "scv-weighted"):
+            if joint is None:
+                x = np.column_stack([table[n] for n in cvs])
+                joint = scv(x, weights, weighted=method == "scv-weighted").bandwidth
+            values.append(float(joint[k]))
+            sources[name] = method
         else:
             values.append(silverman(table[name], weights, ndim=len(cvs), bias_factor=bias_factor))
             sources[name] = "silverman"
@@ -73,6 +94,7 @@ def reweight_table(
     quantity: str | None = None,
     bandwidth: Mapping[str, float] | None = None,
     configured_bandwidth: Mapping[str, float | None] | None = None,
+    bandwidth_method: str | None = None,
     bias_factor: float | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> Surface:
@@ -101,6 +123,7 @@ def reweight_table(
         explicit=bandwidth,
         configured=configured_bandwidth,
         bias_factor=bias_factor,
+        method=bandwidth_method,
     )
     quantities = {quantity: table[quantity]} if quantity else None
     log_p, averages = kde_on_grid(table.array(cvs), logw, grid, bandwidths, quantities=quantities)
@@ -178,6 +201,7 @@ def reweight(
     points: int | Sequence[int] = DEFAULT_POINTS,
     limits: Mapping[str, Limits] | None = None,
     bandwidth: Mapping[str, float] | None = None,
+    bandwidth_method: str | None = None,
     include_walls: bool = False,
     jobs: int = 1,
     skip_failed: bool = False,
@@ -200,6 +224,10 @@ def reweight(
         ``{cv: (min, max)}`` overriding estk.yaml, the PLUMED walls and the data range.
     bandwidth:
         ``{cv: h}`` overriding estk.yaml and Silverman's rule.
+    bandwidth_method:
+        "silverman", "scv" (smoothed cross-validation on the biased frames) or
+        "scv-weighted" for the CVs not in ``bandwidth``, instead of the values in estk.yaml.
+        Computed for each run.
     include_walls:
         Add the PLUMED wall energies to the bias.
     jobs:
@@ -269,6 +297,7 @@ def reweight(
             quantity=quantity,
             bandwidth=bandwidth,
             configured_bandwidth=configured,
+            bandwidth_method=bandwidth_method,
             bias_factor=meta.bias_factor,
             metadata={
                 "temperature": meta.temperature,
@@ -313,3 +342,66 @@ def _outcome(call: Any) -> tuple[Surface | None, EstError | None]:
         return call(), None
     except EstError as exc:
         return None, exc
+
+
+@dataclass
+class BandwidthEstimate:
+    """Bandwidths of one run (or of all runs together) by each method, per CV."""
+
+    run: str
+    frames: int
+    effective_frames: float
+    bandwidths: dict[str, dict[str, float]]  # method -> {cv: h}
+
+
+def estimate_bandwidths(
+    project: Project,
+    cvs: Sequence[str],
+    *,
+    time: tuple[float | None, float | None] | None = None,
+    include_walls: bool = False,
+    methods: Sequence[str] = ("silverman", "scv"),
+) -> list[BandwidthEstimate]:
+    """Bandwidths of each run, and of all runs together (last, ``"all"``), by each method.
+
+    "all" pools the frames of every run with their own weights ``exp(bias / kT)``, as the
+    ``probability`` combination does. See ``BANDWIDTH_METHODS``.
+    """
+    cvs = list(cvs)
+    unknown = [m for m in methods if m not in BANDWIDTH_METHODS]
+    if unknown or not methods:
+        raise EstError(f"methods must be among {', '.join(BANDWIDTH_METHODS)}, got {methods}")
+    tables = {run.name: run.load_cvs(cvs, time=time, include_walls=include_walls)
+              for run in project.runs}  # fmt: skip
+    if not tables:
+        raise EstError("no runs found")
+    bias_factors = {run.name: run.metadata.bias_factor for run in project.runs}
+
+    def estimate(name: str, x: np.ndarray, raw: np.ndarray, bias_factor: float | None):
+        weights = np.exp(raw - logsumexp(raw))
+        found: dict[str, dict[str, float]] = {}
+        if "silverman" in methods:
+            found["silverman"] = {
+                cv: silverman(x[:, k], weights, ndim=len(cvs), bias_factor=bias_factor)
+                for k, cv in enumerate(cvs)
+            }
+        for method in ("scv", "scv-weighted"):
+            if method in methods:
+                h = scv(x, weights, weighted=method == "scv-weighted").bandwidth
+                found[method] = {cv: float(h[k]) for k, cv in enumerate(cvs)}
+        return BandwidthEstimate(name, len(x), effective_sample_size(weights), found)
+
+    results, xs, raws = [], [], []
+    for name, table in tables.items():
+        if table.bias is None or table.kbt is None:
+            raise EstError(f"{name}: no bias or temperature; cannot weight the frames")
+        x = np.column_stack([table[cv] for cv in cvs])
+        raw = log_weights(table.bias, table.kbt)
+        results.append(estimate(name, x, raw, bias_factors.get(name)))
+        xs.append(x)
+        raws.append(raw)
+    if len(tables) > 1:
+        factors = {f for f in bias_factors.values() if f is not None}
+        results.append(estimate("all", np.concatenate(xs), np.concatenate(raws),
+                                factors.pop() if len(factors) == 1 else None))  # fmt: skip
+    return results

@@ -28,6 +28,7 @@ Example::
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -266,6 +267,85 @@ def load_config(path: Path | str | None = None) -> ProjectConfig:
         raise ConfigError("invalid configuration", _format_errors(exc), path=path) from None
     config._path = path.resolve()
     return config
+
+
+def set_cv_bandwidths(path: Path | str, values: dict[str, float]) -> None:
+    """Write ``cv.<name>.bandwidth`` into an existing estk.yaml, changing only those lines.
+
+    Comments, anchors and the layout of the rest of the file are kept. The result is loaded
+    again to check it; on any problem the file is left as it was.
+    """
+    path = Path(path)
+    original = path.read_text()
+    lines = original.splitlines()
+    for name, value in values.items():
+        lines = _set_cv_key(lines, name, "bandwidth", f"{value:.4g}")
+    path.write_text("\n".join(lines) + "\n")
+    try:
+        config = load_config(path)
+        for name, value in values.items():
+            if config.cv[name].bandwidth != float(f"{value:.4g}"):
+                raise ConfigError(f"could not set cv.{name}.bandwidth", path=path)
+    except Exception:
+        path.write_text(original)
+        raise
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def _is_content(line: str) -> bool:
+    return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def _block_end(lines: list[str], start: int, indent: int) -> int:
+    """Index after the last content line indented deeper than ``indent``, from ``start + 1``."""
+    end = start + 1
+    for i in range(start + 1, len(lines)):
+        if _is_content(lines[i]):
+            if _indent(lines[i]) <= indent:
+                break
+            end = i + 1
+    return end
+
+
+def _set_cv_key(lines: list[str], name: str, key: str, value: str) -> list[str]:
+    lines = list(lines)
+    header = re.compile(r"cv:\s*(\{\s*\})?\s*(#.*)?$")  # "cv:", "cv: {}", with a comment
+    section = next((i for i, line in enumerate(lines) if header.match(line)), None)
+    if section is None:
+        return [*lines, "", "cv:", f"  {name}:", f"    {key}: {value}"]
+    lines[section] = "cv:"
+    end = _block_end(lines, section, 0)
+    entries = [i for i in range(section + 1, end) if _is_content(lines[i])]
+    indent = _indent(lines[entries[0]]) if entries else 2
+    for i in entries:
+        if _indent(lines[i]) != indent:
+            continue
+        key_text, _, rest = lines[i].strip().partition(":")
+        if key_text.strip("'\"") != name:
+            continue
+        rest = rest.split(" #")[0].strip()
+        if rest:  # flow mapping, e.g. "d0: {limits: [1, 2]}"
+            if "&" in rest or "*" in rest or not rest.startswith("{"):
+                raise ConfigError(f"cannot edit cv.{name} ({rest}); set {key} by hand")
+            mapping = yaml.safe_load(rest) or {}
+            mapping[key] = float(value)
+            flow = yaml.safe_dump(mapping, default_flow_style=True, sort_keys=False).strip()
+            lines[i] = f"{' ' * indent}{key_text}: {flow}"
+            return lines
+        entry_end = _block_end(lines, i, indent)
+        children = [j for j in range(i + 1, entry_end) if _is_content(lines[j])]
+        child = _indent(lines[children[0]]) if children else indent + 2
+        for j in children:
+            if _indent(lines[j]) == child and lines[j].strip().startswith(f"{key}:"):
+                lines[j] = f"{' ' * child}{key}: {value}"
+                return lines
+        lines.insert(entry_end, f"{' ' * child}{key}: {value}")
+        return lines
+    lines[end:end] = [f"{' ' * indent}{name}:", f"{' ' * (indent + 2)}{key}: {value}"]
+    return lines
 
 
 def _format_errors(exc: ValidationError) -> list[str]:

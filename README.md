@@ -5,8 +5,8 @@ free-energy surfaces, minimum-energy paths, barrier convergence and structure ex
 
 The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
 for the plan and the status of each part. At this stage the configuration, reading the simulation
-settings, loading CV data, reweighting, combining runs, minimum energy paths, figures, barrier
-convergence and the OPES / model-deviation checks are in place.
+settings, loading CV data, bandwidth selection, reweighting, combining runs, minimum energy
+paths, figures, barrier convergence and the OPES / model-deviation checks are in place.
 
 ## Install
 
@@ -26,7 +26,9 @@ estk config show             # settings in effect and where each one comes from
 estk config validate         # check estk.yaml after editing it
 estk runs                    # temperature, timestep, bias, walls... read for each run
 estk cvs d0 cn --time 0 20   # rows kept, CV ranges and frames past walls, per run
+estk bandwidth d0 cn         # Silverman and SCV bandwidths per run; --save writes them
 estk reweight d0 cn -j 4     # per-run surfaces + all runs combined -> reweight-d0-cn/
+estk reweight d0 cn --bandwidth scv   # bandwidths by smoothed cross-validation instead
 estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)

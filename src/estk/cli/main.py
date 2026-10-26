@@ -207,7 +207,10 @@ def reweight(
     ] = None,
     bandwidth: Annotated[
         list[str] | None,
-        typer.Option(help="Kernel bandwidth of a CV, e.g. --bandwidth d0=0.02 (repeat)."),
+        typer.Option(
+            help="Kernel bandwidth of a CV, e.g. --bandwidth d0=0.02 (repeat), or a method for "
+            "the others: scv (smoothed cross-validation), scv-weighted or silverman."
+        ),
     ] = None,
     include_walls: Annotated[
         bool, typer.Option("--include-walls", help="Add the PLUMED wall energies to the bias.")
@@ -249,7 +252,7 @@ def reweight(
         time=time,
         points=_parse_points(points),
         limits=_parse_assignments(limits, "limits", pair=True),
-        bandwidth=_parse_assignments(bandwidth, "bandwidth", pair=False),
+        **_parse_bandwidth(bandwidth),
         include_walls=include_walls,
         jobs=jobs,
         skip_failed=skip_failed,
@@ -283,6 +286,83 @@ def reweight(
     for run_name, reason in result.failed.items():
         err_console.print(f"[yellow]skipped {run_name}:[/yellow] {reason}", highlight=False)
     console.print(f"wrote {len(paths)} file(s) to {folder}/")
+
+
+@app.command("bandwidth")
+@handle_errors
+def bandwidth_command(
+    names: Annotated[list[str], typer.Argument(help="CVs of the grid, e.g. d0 cn.")],
+    method: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="silverman, scv or scv-weighted; repeat for several (default: silverman, scv)."
+        ),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None, typer.Option(help="Time window in ns, e.g. --time 0 20.")
+    ] = None,
+    include_walls: Annotated[
+        bool, typer.Option("--include-walls", help="Add the PLUMED wall energies to the bias.")
+    ] = False,
+    save: Annotated[
+        bool,
+        typer.Option(
+            "--save", help="Write the all-runs values (of scv, or of the one --method) to the yaml."
+        ),
+    ] = False,
+) -> None:
+    """Kernel bandwidths by Silverman's rule and by smoothed cross-validation (SCV).
+
+    One row per run and one for all runs together. scv fits the biased frames, all equal (as
+    the original scripts); scv-weighted fits the reweighted frames, i.e. the unbiased density,
+    which with few effective frames smooths the barrier regions away. estk reweight uses the
+    estk.yaml values, or a method with --bandwidth scv / silverman / scv-weighted.
+    """
+    from estk.config import set_cv_bandwidths
+    from estk.project import Project
+    from estk.reweight import estimate_bandwidths
+    from estk.reweight.core import BANDWIDTH_METHODS
+
+    methods = list(dict.fromkeys(method or ["silverman", "scv"]))
+    if any(m not in BANDWIDTH_METHODS for m in methods):
+        raise EstError(f"--method: choose from {', '.join(BANDWIDTH_METHODS)}")
+    config = load_config(_state["config"])
+    if save and config.path is None:
+        raise EstError(f"--save: no {CONFIG_FILENAME} found (run estk init first)")
+    estimates = estimate_bandwidths(
+        Project(config), names, time=time, include_walls=include_walls, methods=methods
+    )
+
+    from rich.table import Column
+
+    columns = [Column(f"h({n})\n{m}", overflow="fold") for m in methods for n in names]
+    table = Table("run", "frames", "n_eff", *columns)
+    for est in estimates:
+        if est.run == "all":
+            table.add_section()
+        table.add_row(
+            est.run, str(est.frames), f"{est.effective_frames:.0f}",
+            *[f"{est.bandwidths[m][n]:.3g}" for m in methods for n in names],
+        )  # fmt: skip
+    console.print(table)
+    configured = {n: config.cv[n].bandwidth if n in config.cv else None for n in names}
+    listed = ", ".join(f"{n}={_fmt(h)}" for n, h in configured.items())
+    console.print(f"{CONFIG_FILENAME} (used by estk reweight): {listed}", style="dim")
+    if "silverman" in methods:
+        console.print("silverman: normal reference, divided by sqrt(bias factor)", style="dim")
+    if "scv" in methods:
+        console.print("scv: smoothed cross-validation on the biased frames", style="dim")
+    if "scv-weighted" in methods:
+        console.print("scv-weighted: on the reweighted frames; oversmooths barriers when the "
+                      "effective frames are few", style="dim")  # fmt: skip
+    if save:
+        if len(methods) > 1 and "scv" not in methods:
+            raise EstError("--save: give one --method to save")
+        chosen = methods[0] if len(methods) == 1 else "scv"
+        values = estimates[-1].bandwidths[chosen]
+        set_cv_bandwidths(config.path, values)  # type: ignore[arg-type]
+        listed = ", ".join(f"{n}={h:.4g}" for n, h in values.items())
+        console.print(f"wrote {listed} ({chosen}, {estimates[-1].run}) to {config.path}")
 
 
 @app.command("combine")
@@ -653,7 +733,7 @@ def _convergence(
         reweight_options={
             "points": _parse_points(points),
             "limits": _parse_assignments(limits, "limits", pair=True),
-            "bandwidth": _parse_assignments(bandwidth, "bandwidth", pair=False),
+            **_parse_bandwidth(bandwidth),
             "include_walls": include_walls,
             "combine": mode,
             "jobs": jobs,
@@ -710,7 +790,9 @@ def convergence_time(
     relax: _RELAX = False,
     points: Annotated[str, typer.Option(help="Grid points (100 or 100,80).")] = "100",
     limits: Annotated[list[str] | None, typer.Option(help="Grid limits, e.g. d0=1.5,2.2.")] = None,
-    bandwidth: Annotated[list[str] | None, typer.Option(help="Bandwidth, e.g. d0=0.02.")] = None,
+    bandwidth: Annotated[
+        list[str] | None, typer.Option(help="Bandwidth, e.g. d0=0.02, or scv / silverman.")
+    ] = None,
     include_walls: Annotated[bool, typer.Option("--include-walls")] = False,
     combine: Annotated[str, typer.Option(help="probability, equal or legacy.")] = "probability",
     jobs: Annotated[int, typer.Option("--jobs", "-j")] = 1,
@@ -959,6 +1041,20 @@ def _parse_assignments(
             example = "d0=1.5,2.5" if pair else "d0=0.02"
             raise EstError(f"--{option}: expected e.g. {example}, got {item!r}") from None
     return parsed
+
+
+def _parse_bandwidth(items: list[str] | None) -> dict[str, Any]:
+    """``--bandwidth`` values: ``NAME=h`` per CV, or one method name (scv, silverman)."""
+    from estk.reweight.core import BANDWIDTH_METHODS
+
+    methods = [item for item in items or [] if item in BANDWIDTH_METHODS]
+    if len(methods) > 1:
+        raise EstError(f"--bandwidth: one method only, got {', '.join(methods)}")
+    values = [item for item in items or [] if item not in BANDWIDTH_METHODS]
+    return {
+        "bandwidth": _parse_assignments(values, "bandwidth", pair=False),
+        "bandwidth_method": methods[0] if methods else None,
+    }
 
 
 def _fmt(value: float | None) -> str:

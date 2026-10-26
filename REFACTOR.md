@@ -138,7 +138,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 5 | [CV data loading](#5-cv-data-loading) | done |
 | 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | done |
 | 7 | [Combining runs](#7-combining-runs) | done |
-| 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
+| 8 | [Bandwidth selection](#8-bandwidth-selection) | done |
 | 9 | [Surface file format](#9-surface-file-format) | done |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
 | 11 | [Barrier convergence](#11-barrier-convergence) | done |
@@ -551,13 +551,45 @@ Notes on what was built:
 
 ## 8. Bandwidth selection
 
-**Status:** in progress
+**Status:** done
 
 **Done:** `estk.reweight.silverman` (same formula as the old code, which is checked in a test;
-`ndim` is the number of CVs instead of a hard-coded 2; `weighted_std=True` is available) and
-`effective_sample_size`. Bandwidths: `--bandwidth` > `cv.<name>.bandwidth` in estk.yaml >
-Silverman, recorded with their source in each surface's metadata.
-**Left:** SCV and the `estk bandwidth` command.
+`ndim` is the number of CVs instead of a hard-coded 2; `weighted_std=True` is available),
+`effective_sample_size`, `estk.reweight.scv` (smoothed cross-validation, diagonal bandwidth,
+any number of CVs), `estimate_bandwidths`, `config.set_cv_bandwidths`, and
+`estk bandwidth CV... [--method silverman|scv|scv-weighted ...] [--time A B] [--include-walls]
+[--save]`. Reweighting takes `--bandwidth scv` (or `silverman`, `scv-weighted`) next to
+`--bandwidth d0=0.02`. Tested in `tests/test_bandwidth.py`.
+
+Notes on what was built:
+- **Order:** `--bandwidth d0=h` > a method given with `--bandwidth scv|silverman|scv-weighted`
+  > `cv.<name>.bandwidth` in estk.yaml > Silverman. Each surface records the values and where
+  each came from (`bandwidth`, `bandwidth_source`). Methods are applied to each run.
+- **SCV** (Duong & Hazelton 2005) with Gaussian kernels and a normal-scale pilot
+  `g = sigma (2/(d+4))^{1/(d+6)} n^{-1/(d+6)}`, optimised over log h with L-BFGS-B in
+  standardised units. The two old scripts are replaced by one function with two ways to
+  evaluate the pair sums: `binned` (default: linear binning on a grid, the pair sum becomes a
+  sum over grid offsets of the bin-weight autocorrelation, computed once by FFT; each
+  evaluation then costs the same for any number of frames, ~0.3 s per 2-D fit) and `exact`
+  (all pairs, for checks; agrees with `binned` to 1e-4). Tested: equals Silverman's rule on
+  normal data (where that rule is optimal), much narrower than it on bimodal data.
+- **Weighted or not.** SCV can use the frame weights (Σw² in place of 1/n, w_i w_j on the
+  pairs): the criterion of the unbiased density. On the reference runs that is a bad choice
+  for free energies: with 30–190 effective frames per run it picks h(cn) up to 0.32 and the
+  barrier drops from 47 to 22 kJ/mol, because the density error it minimises ignores the
+  barrier regions (no probability there) while −kT log p is all about them. SCV on the
+  biased frames, all equal (as the original scripts), keeps the barrier: `scv` means that;
+  `scv-weighted` is available with that warning. Barrier on the reference runs, all-runs
+  bandwidths: estk.yaml (0.0216, 0.033) 46.7, Silverman 45.4, `scv` (0.042, 0.077) 43.2,
+  `scv-weighted` pooled (0.031, 0.092) 41.4 kJ/mol.
+- **Silverman's σ** stays the unweighted standard deviation of the biased frames divided by
+  √γ (the original choice, documented in `silverman`): the biased distribution is broader
+  by about √γ for a well-tempered bias.
+- `estk bandwidth` prints each run and all runs pooled (each frame with its weight, as the
+  `probability` combination), and the values in estk.yaml. `--save` writes the pooled values
+  (of `scv`, or of the one `--method`) into estk.yaml by editing only the `bandwidth:` lines
+  (or adding them): comments, anchors and layout are kept, and the file is restored if the
+  result does not load.
 
 ### Current state
 - `compute_bw_silverman` (in `ectoolkits_reweight.py`) uses Silverman's rule with the effective
@@ -579,7 +611,7 @@ Silverman, recorded with their source in each surface's metadata.
   - `silverman(cvs, log_weights, *, bias_factor=1.0, weighted_std=False)`
   - `scv(cvs, log_weights, *, method="approx"|"exact", ...)`
 - `bandwidth=` accepts a number or list per CV, `"silverman"` (default) or `"scv"`.
-- `estk bandwidth --cvs d0 cn [--method scv]` prints the values and can write them into
+- `estk bandwidth d0 cn [--method scv]` prints the values and can write them into
   `estk.yaml` (`--save`).
 - The chosen bandwidths are stored in the output surface's metadata.
 
