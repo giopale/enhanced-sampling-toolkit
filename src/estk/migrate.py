@@ -65,6 +65,7 @@ def migrate_case_yaml(path: Path | str) -> tuple[str, list[str]]:
     take("dir_job", "runs", "pattern")
     take("file_lammps_log", "files", "lammps_log")
     take("file_plumed_input", "files", "plumed_input")
+    take("file_model_devi", "files", "model_deviation")
 
     cvs = data.get("cvs") or {}
     used.add("cvs")

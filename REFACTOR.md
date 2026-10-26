@@ -146,7 +146,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 13 | [CVs along the path](#13-cvs-along-the-path) | todo |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
 | 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | todo |
-| 16 | [Diagnostic plots](#16-diagnostic-plots) | todo |
+| 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
 | 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | todo |
 
@@ -897,7 +897,31 @@ Notes on what was built:
 
 ## 16. Diagnostic plots
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/analysis/diagnostics.py` (`read_timeseries`, `opes_columns`,
+`opes_summary`, `deviation_stats`), `src/estk/plotting/diagnostics.py` (`plot_timeseries`,
+`plot_model_deviation`), the config entry `files.model_deviation` (default `model_devi.out`,
+migrated from `file_model_devi`), and the commands
+`estk check opes [--log-time] [--style] [-o FILE]` and
+`estk check model-deviation [--column max_devi_f] [--file F] [--levels 0.2,0.35]
+[--time A B] [--style] [-o FILE]`. Tested in `tests/test_diagnostics.py`.
+
+Notes on what was built:
+- **Time:** files indexed by `step` (model_devi.out) are converted with each run's timestep
+  read from log.lammps, instead of a hard-coded timestep; restarts (repeated times) keep the
+  last occurrence, as everywhere else (section 5).
+- **OPES:** every component that COLVAR contains under the bias label found in the PLUMED input
+  (`<label>.rct/zed/neff/nker`) is shown, one panel each, with log axes for zed and neff. The
+  table gives the final values and how much c(t) (`rct`) still changed over the last quarter of
+  each run: a converged run has an almost constant c(t). When a short start-up transient
+  dominates a linear panel, the y range is set from the data after the first 5% of each run.
+- **Model deviation:** time series (raw values faint, running median on top so that several
+  runs stay readable) next to the distribution of each run on log bins, with the two trust
+  levels as dashed lines. The table gives, per run, the fraction of frames below, between and
+  above the levels (accurate / candidates for retraining / unreliable), the mean and the max.
+- Both figures use the run colours of the other plots and the `paper`/`slides` styles; the
+  default outputs are `opes.png` and `model_deviation.png`.
 
 ### Current state
 - `commands/plot_opes_c.py`: time series and histograms of `opes.rct`, `opes.neff`, `opes.zed`

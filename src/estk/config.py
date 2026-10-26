@@ -65,6 +65,7 @@ class FilesConfig(_Section):
     lammps_log: str = "log.lammps"
     plumed_input: str = "plumed.plumed"
     colvar: str = "COLVAR"
+    model_deviation: str = "model_devi.out"
 
 
 class SimulationConfig(_Section):
@@ -306,6 +307,7 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         "  lammps_log: log.lammps",
         "  plumed_input: plumed.plumed",
         "  colvar: COLVAR",
+        "  model_deviation: model_devi.out",
         "",
         "# Only needed when a value can't be read from the simulation files:",
         "# simulation:",

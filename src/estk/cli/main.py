@@ -733,6 +733,114 @@ def convergence_bandwidth(
     )  # fmt: skip
 
 
+check_app = typer.Typer(help="Checks of the simulations.", no_args_is_help=True)
+app.add_typer(check_app, name="check")
+
+
+def _save_figure(fig: object, targets: list[Path]) -> None:
+    import matplotlib.pyplot as plt
+
+    for target in targets:
+        fig.savefig(target)  # type: ignore[attr-defined]
+    plt.close(fig)  # type: ignore[arg-type]
+    console.print(f"wrote {', '.join(str(t) for t in targets)}")
+
+
+@check_app.command("opes")
+@handle_errors
+def check_opes(
+    log_time: Annotated[bool, typer.Option("--log-time", help="Logarithmic time axis.")] = False,
+    style: StyleOption = "paper",
+    output: OutputsOption = None,
+) -> None:
+    """OPES quantities (rct, zed, neff, nker) against time, and whether c(t) has levelled off."""
+    from estk.analysis import opes_columns, opes_summary, read_timeseries
+    from estk.plotting import plot_style
+    from estk.plotting.core import use_agg
+    from estk.plotting.diagnostics import plot_timeseries
+    from estk.project import Project
+
+    project = Project(load_config(_state["config"]))
+    series = {}
+    columns: list[str] = []
+    for run in project.runs:
+        names = opes_columns(run)
+        series[run.name] = read_timeseries(run, names)
+        columns += [c for c in names if c not in columns]
+    units = project.runs[0].metadata.energy_units
+    table = Table("run", "time (ns)", *columns, f"rct change, last quarter ({units})")
+    for name, ts in series.items():
+        summary = opes_summary(ts)
+        change = "-" if summary.rct_change is None else f"{summary.rct_change:+.3g}"
+        table.add_row(
+            name, f"{summary.time:.3g}",
+            *[f"{summary.final[c]:.4g}" if c in summary.final else "-" for c in columns], change,
+        )  # fmt: skip
+    console.print(table)
+    console.print("final values; a converged run has an almost constant rct (c(t))")
+    use_agg()
+    with plot_style(style):
+        fig = plot_timeseries(
+            series,
+            columns,
+            log_time=log_time,
+            log_columns=[c for c in columns if c.endswith((".zed", ".neff"))],
+        )
+        _save_figure(fig, output or [Path("opes.png")])
+
+
+@check_app.command("model-deviation")
+@handle_errors
+def check_model_deviation(
+    column: Annotated[str, typer.Option(help="Column to check.")] = "max_devi_f",
+    file: Annotated[
+        str | None, typer.Option(help="File in each run (default: files.model_deviation).")
+    ] = None,
+    levels: Annotated[
+        str, typer.Option(help="Trust levels low,high (e.g. 0.2,0.35 eV/Å).")
+    ] = "0.2,0.35",
+    time: Annotated[tuple[float, float] | None, typer.Option(help="Time window in ns.")] = None,
+    style: StyleOption = "paper",
+    output: OutputsOption = None,
+) -> None:
+    """Model deviation of the ML potential: fraction of frames below, between and above the
+    trust levels, and its time series and distribution."""
+    from estk.analysis import deviation_stats, read_timeseries
+    from estk.plotting import plot_style
+    from estk.plotting.core import use_agg
+    from estk.plotting.diagnostics import plot_model_deviation
+    from estk.project import Project
+
+    try:
+        low, high = (float(v) for v in levels.split(","))
+    except ValueError:
+        raise EstError(f"--levels: expected two numbers like 0.2,0.35, got {levels!r}") from None
+    project = Project(load_config(_state["config"]))
+    name = file or project.config.files.model_deviation
+    series = {}
+    for run in project.runs:
+        ts = read_timeseries(run, [column], name)
+        if time is not None:
+            keep = (ts.time >= time[0]) & (ts.time <= time[1])
+            ts.time = ts.time[keep]
+            ts.values = {k: v[keep] for k, v in ts.values.items()}
+        series[run.name] = ts
+    table = Table("run", "frames", f"< {low:g}", f"{low:g} - {high:g}", f">= {high:g}", "mean",
+                  "max")  # fmt: skip
+    for run_name, ts in series.items():
+        stats = deviation_stats(ts, column, low, high)
+        table.add_row(
+            run_name, str(stats.frames), f"{100 * stats.below:.1f} %",
+            f"{100 * stats.between:.1f} %", f"{100 * stats.above:.1f} %", f"{stats.mean:.3g}",
+            f"{stats.maximum:.3g}",
+        )  # fmt: skip
+    console.print(table)
+    use_agg()
+    with plot_style(style):
+        fig = plot_model_deviation(series, column, low=low, high=high)
+        _save_figure(fig, output or [Path("model_deviation.png")])
+
+
 def _parse_point(text: str | None, option: str, ndim: int) -> list[float] | None:
     if text is None:
         return None
