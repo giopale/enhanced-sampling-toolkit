@@ -450,6 +450,9 @@ def plot_surface_command(
         float | None, typer.Option(help="Spacing of the contour lines (0: none).")
     ] = None,
     ncols: Annotated[int, typer.Option(help="Columns of small multiples.")] = 3,
+    contour_labels: Annotated[
+        str, typer.Option(help="Numbers on the contour lines: all, some (default) or none.")
+    ] = "some",
     style: StyleOption = "paper",
     output: OutputsOption = None,
 ) -> None:
@@ -470,13 +473,13 @@ def plot_surface_command(
         if len(surfaces) == 1:
             ax = plot_surface(
                 next(iter(surfaces.values())), path=mep_path, units=units, vmax=vmax,
-                contour_step=step, labels=labels,
+                contour_step=step, contour_labels=contour_labels, labels=labels,
             )  # fmt: skip
             fig = ax.figure
         else:
             fig = plot_surfaces(
                 surfaces, ncols=ncols, path=mep_path, units=units, vmax=vmax, contour_step=step,
-                labels=labels,
+                contour_labels=contour_labels, labels=labels,
             )  # fmt: skip
         for target in targets:
             fig.savefig(target)

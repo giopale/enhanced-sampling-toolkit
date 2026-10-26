@@ -739,6 +739,8 @@ Notes on what was built:
   given instead.
 - **Free-energy maps:** one-hue blue scale for the depth of the basins (lowest F darkest), in
   discrete bands between black contour lines (`--step 0` for a smooth scale without lines),
+  with the values written on every other line (`--contour-labels all|some|none`; black text
+  with a thin white outline, readable on dark bands and over a path),
   white above the colour range and where there is no data; contour lines at a round spacing
   (about 8 by default); colour bar ticks at round values inside the range. Default range 20 kT.
   Property maps use a second one-hue scale (orange).

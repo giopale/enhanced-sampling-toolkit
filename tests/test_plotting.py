@@ -150,3 +150,16 @@ def test_colour_bands_match_contours(surface):
     np.testing.assert_allclose(ax.figure.axes[-1].get_yticks(), filled.levels)
     smooth = plot_surface(surface, vmax=10.0, contour_step=0)
     assert len(smooth.collections[0].levels) == 65
+
+
+def test_contour_labels(surface):
+    some = plot_surface(surface, vmax=10.0, contour_step=2.0)
+    assert sorted(t.get_text() for t in some.texts if t.get_text()) and {
+        t.get_text() for t in some.texts
+    } <= {"4", "8"}
+    every = plot_surface(surface, vmax=10.0, contour_step=2.0, contour_labels="all")
+    assert {t.get_text() for t in every.texts} <= {"2", "4", "6", "8", "10"}
+    assert len(every.texts) > len(some.texts)
+    assert len(plot_surface(surface, vmax=10.0, contour_step=2.0, contour_labels="none").texts) == 0
+    with pytest.raises(EstError, match="contour labels"):
+        plot_surface(surface, contour_labels="few")

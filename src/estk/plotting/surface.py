@@ -6,6 +6,7 @@ import math
 from collections.abc import Mapping, Sequence
 
 import numpy as np
+from matplotlib import patheffects
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
@@ -34,6 +35,7 @@ def plot_surface(
     vmin: float | None = None,
     vmax: float | None = None,
     contour_step: float | None = None,
+    contour_labels: str = "some",
     labels: Mapping[str, str] | None = None,
     colorbar: bool = True,
     title: str | None = None,
@@ -45,6 +47,9 @@ def plot_surface(
     ``contour_step`` (default: a round step giving about 8 lines; 0 for a smooth scale without
     lines) and, if given, a ``MinimumEnergyPath`` on top. 1D: the profile, with the error
     band if the surface has one.
+
+    ``contour_labels``: write the value on ``"all"`` contour lines, on every other one
+    (``"some"``, default) or on ``"none"``.
 
     ``units`` converts free energies for display (``"kJ/mol"``, ``"eV"``, ``"kT"``, ...).
     ``vmax`` defaults to 20 kT (free energies) or the data range (properties).
@@ -68,7 +73,7 @@ def plot_surface(
         _plot_profile_1d(ax, surface, values, error, labels, value_label)
     elif surface.grid.ndim == 2:
         lo, hi = _color_range(surface, values, finite, vmin, vmax, kbt, factor)
-        _plot_map_2d(ax, surface, values, lo, hi, contour_step, kbt, factor, labels)
+        _plot_map_2d(ax, surface, values, lo, hi, contour_step, contour_labels, labels)
         if colorbar:
             _colorbar(ax.figure, ax.collections[0], ax, value_label)
         if path is not None:
@@ -88,6 +93,7 @@ def plot_surfaces(
     units: str | None = None,
     vmax: float | None = None,
     contour_step: float | None = None,
+    contour_labels: str = "some",
     labels: Mapping[str, str] | None = None,
 ) -> Figure:
     """Small multiples of several surfaces on the same grid, with one shared colour scale.
@@ -116,7 +122,7 @@ def plot_surfaces(
         ax = axes[k // ncols][k % ncols]
         plot_surface(
             surface, ax, path=path, units=units, vmax=vmax, contour_step=contour_step,
-            labels=labels, colorbar=False, title=name,
+            contour_labels=contour_labels, labels=labels, colorbar=False, title=name,
         )  # fmt: skip
         if k % ncols:
             ax.set_ylabel("")
@@ -201,8 +207,7 @@ def _plot_map_2d(
     lo: float,
     hi: float,
     contour_step: float | None,
-    kbt: float | None,
-    factor: float,
+    contour_labels: str,
     labels: Mapping[str, str] | None,
 ) -> None:
     X, Y = surface.grid.mesh()
@@ -219,7 +224,8 @@ def _plot_map_2d(
     extend = "max" if surface.is_fes else "both"
     if len(lines) > 1:
         ax.contourf(X, Y, masked, levels=lines, cmap=cmap, extend=extend)
-        ax.contour(X, Y, masked, levels=lines, colors=INK, linewidths=0.4)
+        contours = ax.contour(X, Y, masked, levels=lines, colors=INK, linewidths=0.4)
+        _label_contours(ax, contours, lines, contour_labels)
     else:  # no contour lines: a smooth colour scale
         ax.contourf(X, Y, masked, levels=np.linspace(lo, hi, 65), cmap=cmap, extend=extend)
     names = surface.grid.names
@@ -245,3 +251,24 @@ def _plot_profile_1d(
     ax.set_xlabel(axis_label(surface.grid.names[0], labels))
     ax.set_ylabel(value_label)
     ax.set_xlim(x[0], x[-1])
+
+
+def _label_contours(ax: Axes, contours: object, lines: np.ndarray, which: str) -> None:
+    """Write the level on the contour lines: all, every other one (some) or none."""
+    if which not in ("all", "some", "none"):
+        raise EstError(f"contour labels: choose all, some or none, not '{which}'")
+    if which == "none":
+        return
+    chosen = lines[1:] if which == "all" else lines[2::2]  # the lowest level is just a point
+    if len(chosen) == 0:
+        return
+    decimals = max(0, -int(np.floor(np.log10(np.min(np.diff(lines)))))) if len(lines) > 1 else 2
+    texts = ax.clabel(
+        contours, levels=chosen, inline=True, inline_spacing=2, fontsize="xx-small",
+        fmt=lambda v: f"{v:.{decimals}f}",
+    )  # fmt: skip
+    # A thin white outline keeps the numbers readable on dark bands and over a path.
+    halo = [patheffects.withStroke(linewidth=1.2, foreground="white")]
+    for text in texts:
+        text.set_path_effects(halo)
+        text.set_zorder(7)
