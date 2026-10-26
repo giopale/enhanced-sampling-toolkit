@@ -18,6 +18,9 @@ This installs the `estk` command and the `estk` Python package.
 
 ## Quick start
 
+A step-by-step guide with example output and figures is in
+[docs/quickstart.md](docs/quickstart.md). In short:
+
 In the folder that contains your run folders (`000/`, `001/`, ...):
 
 ```bash

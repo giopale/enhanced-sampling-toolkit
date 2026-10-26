@@ -134,4 +134,4 @@ def test_reference_path_follows_reaction_start(project, tmp_path):
     oriented = barrier_convergence(Project(config), ["d0", "cn"], "time", [0.2],
                                    reweight_options=OPTIONS).path  # fmt: skip
     np.testing.assert_allclose(oriented.points[0], reference.points[-1], atol=1e-6)
-    assert "reaction.start" in oriented.metadata["start_from"]
+    assert "reaction.start" in oriented.metadata["ends"]

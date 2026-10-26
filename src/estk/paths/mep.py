@@ -145,7 +145,8 @@ def minimum_energy_path(
     split_axis: int | str = 0,
     min_depth_kt: float = DEFAULT_MIN_DEPTH_KT,
     reverse: bool = False,
-    orient: Mapping[str, float] | None = None,
+    start_near: Mapping[str, float] | None = None,
+    end_near: Mapping[str, float] | None = None,
     images: int = DEFAULT_IMAGES,
     dt: float = 0.01,
     max_steps: int = 2000,
@@ -157,21 +158,23 @@ def minimum_energy_path(
 
     The ends are ``start`` and ``end`` if given; otherwise minima found with ``method``:
 
-    - ``"basins"``: the ``minima`` lowest minima whose basin is at least ``min_depth_kt`` kT deep;
-      start and end are the two lowest, in order along the first CV (``via`` = a third one);
+    - ``"basins"``: minima whose basin is at least ``min_depth_kt`` kT deep; start and end are
+      the two lowest, in order along the first CV (``via``: the next ``minima - 2``);
     - ``"split"``: as the original scripts, the lowest point of each of ``minima`` equal parts
       of the grid along ``split_axis`` (path from the last part to the first when splitting the
       second CV, from the first to the last otherwise; a middle part's minimum is used as
       ``via``).
 
-    ``orient`` (``reaction.start`` in estk.yaml, e.g. ``{"cn": 2.0}``) makes the path start at
-    the found end nearest that point, measured over the CVs it names in units of each CV's grid
-    range. ``reverse`` then swaps start and end. ``metadata["start_from"]`` says why the path
-    starts where it does. The string has ``images`` images and is relaxed with steps
-    of ``dt`` (CV units) for up to ``max_steps``; with ``fixed_ends`` the ends stay on the
-    minima. Free energies above ``cap`` (default: the highest finite value) are set to ``cap``
-    for the relaxation. ``profiles`` are other surfaces (e.g. each run) to evaluate along the
-    path.
+    ``start_near`` (``reaction.start`` in estk.yaml, e.g. ``{"cn": 2.0}``) picks as start the
+    minimum nearest that point among all those found (distance over the CVs it names, in units
+    of each CV's grid range); the end is then the minimum nearest ``end_near``
+    (``reaction.end``) or else the lowest other one. ``reverse`` then swaps start and end.
+    ``metadata["ends"]`` says how the ends were chosen.
+
+    The string has ``images`` images and is relaxed with steps of ``dt`` (CV units) for up to
+    ``max_steps``; with ``fixed_ends`` the ends stay on the minima. Free energies above ``cap``
+    (default: the highest finite value) are set to ``cap`` for the relaxation. ``profiles`` are
+    other surfaces (e.g. each run) to evaluate along the path.
     """
     if not surface.is_fes:
         raise EstError(f"a minimum energy path needs a free-energy surface, not {surface.quantity}")
@@ -181,33 +184,35 @@ def minimum_energy_path(
     min_depth = min_depth_kt * kbt if kbt else 0.0
 
     found: list[Minimum] = []
-    start_from = "given"
+    ends = "given"
     if start is None or end is None:
-        found = find_minima(surface, minima, method=method, min_depth=min_depth, split_axis=axis)
+        hints = {k: _usable(surface, v, k) for k, v in (("start", start_near), ("end", end_near))}
+        chosen = any(hints.values()) and method == "basins"
+        found = find_minima(surface, None if chosen else minima, method=method,
+                            min_depth=min_depth, split_axis=axis)  # fmt: skip
         if len(found) < 2:
             raise EstError(
                 f"found {len(found)} minimum(s) deeper than {min_depth_kt:g} kT; lower "
                 "--min-depth or give --start and --end"
             )
         if method == "split":
-            ordered = found[::-1] if axis == 1 else found
-            auto_start, auto_end = ordered[0].point, ordered[-1].point
-            auto_via = [m.point for m in ordered[1:-1]]
+            found = found[::-1] if axis == 1 else found  # in path order
+            first, last = found[0], found[-1]
+            middle = found[1:-1]
+            ends = "split order"
         else:
-            ends = sorted(found[:2], key=lambda m: m.point)
-            auto_start, auto_end = ends[0].point, ends[1].point
-            auto_via = [m.point for m in found[2:3]]
-        start_from = "split order" if method == "split" else f"smaller {names[0]}"
-        if orient:
-            auto_start, auto_end, auto_via, start_from = _orient(
-                surface, orient, auto_start, auto_end, auto_via, start_from
-            )
+            first, last = sorted(found[:2], key=lambda m: m.point)
+            middle = [m for m in found if m not in (first, last)][: max(0, minima - 2)]
+            ends = f"two lowest, smaller {names[0]} first"
+        if any(hints.values()):
+            first, last, middle, ends = _choose_ends(surface, found, hints, minima, method)
+        auto_start, auto_end, auto_via = first.point, last.point, [m.point for m in middle]
         start = auto_start if start is None else start
         end = auto_end if end is None else end
         via = via or auto_via
     if reverse:
         start, end, via = end, start, list(via)[::-1]
-        start_from += ", reversed"
+        ends += ", reversed"
     for label, point in (("start", start), ("end", end), *(("via", v) for v in via)):
         if len(point) != len(names):
             raise EstError(f"{label} point needs {len(names)} values ({', '.join(names)})")
@@ -246,7 +251,7 @@ def minimum_energy_path(
         "cap": ceiling,
         "converged": result.converged,
         "steps": result.steps,
-        "start_from": start_from,
+        "ends": ends,
     }
     for key in ("kbt", "temperature", "combined", "run", "runs"):
         if key in surface.metadata:
@@ -262,28 +267,50 @@ def minimum_energy_path(
     )
 
 
-def _orient(
-    surface: Surface,
-    orient: Mapping[str, float],
-    start: Sequence[float],
-    end: Sequence[float],
-    via: list[Sequence[float]],
-    default: str,
-) -> tuple[Sequence[float], Sequence[float], list[Sequence[float]], str]:
-    """Swap ``start`` and ``end`` if ``end`` is nearer the ``orient`` point."""
-    grid = surface.grid
-    used = [(k, float(orient[n])) for k, n in enumerate(grid.names) if n in orient]
+def _usable(surface: Surface, point: Mapping[str, float] | None, which: str) -> dict[int, float]:
+    """``{axis: value}`` for the CVs of ``point`` that are on the surface."""
+    if not point:
+        return {}
+    used = {k: float(point[n]) for k, n in enumerate(surface.grid.names) if n in point}
     if not used:
-        log.warning("reaction.start names none of the CVs %s; ignored", ", ".join(grid.names))
-        return start, end, via, default
-    index = [k for k, _ in used]
-    target_point = np.array([v for _, v in used])
-    span = np.array([grid.upper[k] - grid.lower[k] or 1.0 for k in index])
+        log.warning("reaction.%s names none of the CVs %s; ignored", which,
+                    ", ".join(surface.grid.names))  # fmt: skip
+    return used
 
-    def distance(point: Sequence[float]) -> float:
-        return float(np.linalg.norm((np.asarray(point)[index] - target_point) / span))
 
-    target = ", ".join(f"{grid.names[k]}={v:g}" for k, v in used)
-    if distance(end) < distance(start):
-        start, end, via = end, start, via[::-1]
-    return start, end, via, f"nearest {target} (reaction.start)"
+def _choose_ends(
+    surface: Surface,
+    found: list[Minimum],
+    hints: dict[str, dict[int, float]],
+    minima: int,
+    method: str,
+) -> tuple[Minimum, Minimum, list[Minimum], str]:
+    """Start and end among ``found`` (lowest first, or in split order) from the hints."""
+    grid = surface.grid
+
+    def distance(m: Minimum, target: dict[int, float]) -> float:
+        return float(np.sqrt(sum(((m.point[k] - v) / (grid.upper[k] - grid.lower[k] or 1.0)) ** 2
+                                 for k, v in target.items())))  # fmt: skip
+
+    def text(target: dict[int, float], which: str) -> str:
+        values = ", ".join(f"{grid.names[k]}={v:g}" for k, v in target.items())
+        return f"{which} nearest {values} (reaction.{which})"
+
+    # without a hint: the lowest remaining minimum (basins), or the split order
+    rest = list(found)
+    if hints["start"]:
+        start = min(rest, key=lambda m: distance(m, hints["start"]))
+        how_start = text(hints["start"], "start")
+    else:
+        start = rest[0]
+        how_start = "start the lowest other minimum" if method == "basins" else "start split order"
+    rest.remove(start)
+    if hints["end"]:
+        end = min(rest, key=lambda m: distance(m, hints["end"]))
+        how_end = text(hints["end"], "end")
+    else:
+        end = rest[0] if method == "basins" else rest[-1]
+        how_end = "end the lowest other minimum" if method == "basins" else "end split order"
+    rest.remove(end)
+    via = sorted(rest, key=lambda m: m.value)[: max(0, minima - 2)] if method == "basins" else rest
+    return start, end, via, f"{how_start}; {how_end}"

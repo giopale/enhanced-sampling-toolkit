@@ -139,31 +139,48 @@ def test_errors(mb_surface):
         minimum_energy_path(prop)
 
 
-def test_orientation_from_reaction_start(mb_surface):
+def test_ends_from_reaction_start_and_end(mb_surface):
     options = {"min_depth_kt": 8.0, "images": 15, "max_steps": 300}
     default = minimum_energy_path(mb_surface, **options)
     assert default.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
-    assert default.metadata["start_from"] == "smaller x"
+    assert default.metadata["ends"] == "two lowest, smaller x first"
 
     # start at the minimum nearest y = 0 (B), whatever x is
-    oriented = minimum_energy_path(mb_surface, orient={"y": 0.0}, **options)
+    oriented = minimum_energy_path(mb_surface, start_near={"y": 0.0}, **options)
     assert oriented.points[0] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
-    assert oriented.metadata["start_from"] == "nearest y=0 (reaction.start)"
+    assert oriented.points[-1] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+    assert oriented.metadata["ends"] == (
+        "start nearest y=0 (reaction.start); end the lowest other minimum"
+    )
     assert oriented.barrier == pytest.approx(default.reverse_barrier, abs=0.5)
-    # a point given in both CVs, nearer A
-    near_a = minimum_energy_path(mb_surface, orient={"x": -1.0, "y": 1.0}, **options)
-    assert near_a.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
 
-    flipped = minimum_energy_path(mb_surface, orient={"y": 0.0}, reverse=True, **options)
+    flipped = minimum_energy_path(mb_surface, start_near={"y": 0.0}, reverse=True, **options)
     assert flipped.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
-    assert flipped.metadata["start_from"].endswith(", reversed")
-    # CVs not on the surface: ignored; given ends: not reoriented
-    other = minimum_energy_path(mb_surface, orient={"cn": 2.0}, **options)
-    assert other.metadata["start_from"] == "smaller x"
+    assert flipped.metadata["ends"].endswith(", reversed")
+    # CVs not on the surface: ignored; given ends: kept
+    other = minimum_energy_path(mb_surface, start_near={"cn": 2.0}, **options)
+    assert other.metadata["ends"] == "two lowest, smaller x first"
     given = minimum_energy_path(mb_surface, start=MB_MINIMA["A"][:2], end=MB_MINIMA["B"][:2],
-                                orient={"y": 0.0}, **options)  # fmt: skip
+                                start_near={"y": 0.0}, **options)  # fmt: skip
     assert given.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
-    assert given.metadata["start_from"] == "given"
+    assert given.metadata["ends"] == "given"
+
+
+def test_reaction_start_chooses_among_all_minima(mb_surface):
+    """The hints pick among every minimum deep enough, not only the two lowest."""
+    options = {"min_depth_kt": 1.0, "images": 15, "max_steps": 300}
+    c_point = {"x": MB_MINIMA["C"][0], "y": MB_MINIMA["C"][1]}
+    from_c = minimum_energy_path(mb_surface, start_near=c_point, **options)
+    assert from_c.points[0] == pytest.approx(MB_MINIMA["C"][:2], abs=0.011)
+    assert from_c.points[-1] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)  # the lowest
+    to_c = minimum_energy_path(mb_surface, start_near={"y": 0.0}, end_near=c_point, **options)
+    assert to_c.points[0] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
+    assert to_c.points[-1] == pytest.approx(MB_MINIMA["C"][:2], abs=0.011)
+    assert "end nearest" in to_c.metadata["ends"] and "(reaction.end)" in to_c.metadata["ends"]
+    # an end hint alone: the start is the lowest other minimum
+    only_end = minimum_energy_path(mb_surface, end_near={"y": 0.0}, **options)
+    assert only_end.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+    assert only_end.points[-1] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
 
 
 def test_mep_command_uses_reaction_start(mb_surface, tmp_path, monkeypatch):
@@ -177,7 +194,7 @@ def test_mep_command_uses_reaction_start(mb_surface, tmp_path, monkeypatch):
     runner = CliRunner()
     result = runner.invoke(app, ["mep", "mb.dat", "--min-depth", "8", "--max-steps", "300"])
     assert result.exit_code == 0, result.output
-    assert "start: nearest y=0 (reaction.start)" in result.output
+    assert "ends: start nearest y=0 (reaction.start)" in result.output
     path = MinimumEnergyPath.load(tmp_path / "mb.mep.dat")
     assert path.points[0] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
 

@@ -266,7 +266,12 @@ def reweight(
         src_lo, src_hi = result.limit_sources[name]
         console.print(f"grid {name}: {lo:g} ({src_lo}) to {hi:g} ({src_hi}), {n} points")
     weights = result.combined.metadata["run_weights"] if result.combined is not None else {}
-    table = Table("run", "frames", "effective", *[f"h({n})" for n in names], "weight", "past walls")
+    # where each CV's bandwidth came from: in the header when the same for every run
+    sources = {n: {s.metadata["bandwidth_source"][n] for s in result.surfaces.values()}
+               for n in names}  # fmt: skip
+    shared = {n: next(iter(v)) for n, v in sources.items() if len(v) == 1}
+    headers = [f"h({n})\n{shared[n]}" if n in shared else f"h({n})" for n in names]
+    table = Table("run", "frames", "n_eff", *headers, "weight", "past walls")
     for run_name, surface in result.surfaces.items():
         meta = surface.metadata
         report = result.tables[run_name].report
@@ -274,7 +279,11 @@ def reweight(
             run_name,
             str(meta["frames"]),
             f"{meta['effective_frames']:.0f}",
-            *[f"{meta['bandwidth'][n]:.4g} ({meta['bandwidth_source'][n]})" for n in names],
+            *[
+                f"{meta['bandwidth'][n]:.4g}"
+                + ("" if n in shared else f" ({meta['bandwidth_source'][n]})")
+                for n in names
+            ],  # fmt: skip
             f"{weights[run_name]:.3f}" if run_name in weights else "-",
             report.wall_summary() or "-",
         )
@@ -452,6 +461,7 @@ def mep(
     from estk.units import energy_factor
 
     surface = Surface.load(file)
+    reaction = load_config(_state["config"]).reaction
     names = surface.grid.names
     profiles = {}
     if runs:
@@ -469,7 +479,8 @@ def mep(
         split_axis=split_axis if split_axis is not None else 0,
         min_depth_kt=min_depth,
         reverse=reverse,
-        orient=load_config(_state["config"]).reaction.start or None,
+        start_near=reaction.start or None,
+        end_near=reaction.end or None,
         images=images,
         dt=dt,
         max_steps=max_steps,
@@ -497,10 +508,10 @@ def mep(
     start_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[0], strict=True))
     end_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[-1], strict=True))
     console.print(f"path from ({start_point}) to ({end_point}), {images} images")
-    start_from = path.metadata["start_from"]
-    hint = "; set reaction.start in estk.yaml to choose" if "reaction.start" not in start_from \
-        and start_from != "given" else ""  # fmt: skip
-    console.print(f"start: {start_from}{hint}", style="dim")
+    ends = path.metadata["ends"]
+    hint = "; set reaction.start in estk.yaml to choose" if "reaction." not in ends \
+        and ends != "given" else ""  # fmt: skip
+    console.print(f"ends: {ends}{hint}", style="dim")
     if not path.metadata["converged"]:
         err_console.print(f"[yellow]not converged in {max_steps} steps[/yellow]")
     console.print(f"barrier          {energy(path.barrier)}")

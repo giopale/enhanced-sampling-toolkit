@@ -156,13 +156,15 @@ class AtomsConfig(_Section):
 
 
 class ReactionConfig(_Section):
-    """Which way the reaction goes: the path starts at the minimum nearest ``start``.
+    """Which states the reaction connects: paths start at the minimum nearest ``start`` and end
+    at the one nearest ``end`` (default: the lowest other minimum).
 
-    ``start`` gives values of some CVs, e.g. ``{cn: 2.0}``; only the CVs of the surface count.
-    The barrier is measured from that end.
+    Each gives values of some CVs, e.g. ``{cn: 2.0}``; only the CVs of the surface count. The
+    barrier is measured from the start.
     """
 
     start: dict[str, float] = Field(default_factory=dict)
+    end: dict[str, float] = Field(default_factory=dict)
 
 
 class PlotConfig(_Section):
@@ -437,11 +439,13 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         "  #   site_A: [311]",
         "  #   site_B: [313, 218]",
         "",
-        "# Which way the reaction goes: minimum energy paths start at the minimum nearest this",
-        "# point (only the CVs of the surface count) and the barrier is measured from there.",
-        "# Default: the minimum with the smaller value of the first CV.",
+        "# Which states the reaction connects: minimum energy paths start at the minimum nearest",
+        "# `start` (only the CVs of the surface count; the barrier is measured from there) and",
+        "# end at the one nearest `end` (default: the lowest other minimum). Without them: the",
+        "# two lowest minima, the one with the smaller first CV first.",
         "# reaction:",
         "#   start: {cn: 2.0}",
+        "#   end: {cn: 1.0}",
         "",
         "plot:",
         "  style: paper",

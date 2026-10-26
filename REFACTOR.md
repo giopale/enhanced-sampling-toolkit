@@ -148,7 +148,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | todo |
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
-| 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | todo |
+| 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | in progress |
 
 ---
 
@@ -704,15 +704,20 @@ Notes on what was built:
   sublevel sets): a minimum counts if its basin is at least `--min-depth` kT deep (default 2),
   which ignores noise; the lowest pass to a lower basin is reported too. The two lowest minima
   are the ends; a third (`--minima 3`) is used as a via point.
-- **Direction:** which state is the reactant is a fact about the system, so it lives in
-  estk.yaml: `reaction: {start: {cn: 2.0}}` makes the path start at the end minimum nearest
-  that point (only the CVs named count, distances in units of each CV's grid range), and the
-  barrier is measured from there. `estk mep` and the convergence commands follow it;
-  `--reverse` swaps the ends on top, `--start/--end` override. Without it the start is the
-  minimum with the smaller first CV, and `estk mep` says so and points to `reaction.start`.
-  The reason is saved with the path (`start_from`). On the reference runs the old scripts
-  started at cn ≈ 2 (water), the geometric default at cn ≈ 1, so the "barrier" of the two
-  differed (35.5 vs 46.7 kJ/mol); `reaction.start: {cn: 2.0}` restores the old direction. Tested on the Müller-Brown potential (minima, saddle levels, barrier).
+- **Direction:** which states the reaction connects is a fact about the system, so it lives in
+  estk.yaml: `reaction: {start: {cn: 2.0}}` makes the path start at the minimum nearest that
+  point among all those deeper than `--min-depth` (only the CVs named count, distances in
+  units of each CV's grid range); the end is the minimum nearest `reaction.end`, or else the
+  lowest other one. The barrier is measured from the start. `estk mep` and the convergence
+  commands follow it; `--reverse` swaps the ends on top, `--start/--end` override. Without it
+  the ends are the two lowest minima, the one with the smaller first CV first, and `estk mep`
+  says so and points to `reaction.start`. How the ends were chosen is saved with the path
+  (`ends`). On the reference runs the old scripts started at cn ≈ 2 (water), the geometric
+  default at cn ≈ 1, so the "barrier" of the two differed (35.5 vs 46.7 kJ/mol);
+  `reaction.start: {cn: 2.0}` restores the old direction. Choosing among all minima matters
+  when the grid includes a spurious deep minimum (cn = 0 when cn has no lower limit): the
+  two lowest minima are then the wrong pair. Tested on the Müller-Brown potential (minima,
+  saddle levels, barrier, ends from hints).
 - `--method split --split-axis cv` is the old method (cut the grid into equal parts along a CV).
 - Instead of clipping at the plot's `vmax`, free energies are capped at the highest finite value
   for the relaxation (`--cap` to choose; the old behaviour is `--cap` = vmax).
@@ -1026,7 +1031,12 @@ Notes on what was built:
 
 ## 18. Tests, CI and docs
 
-**Status:** todo
+**Status:** in progress
+
+**Done so far:** unit tests for every module and the regression test on the reference runs
+(`tests/`, 176 tests); `docs/quickstart.md`, a walk through one analysis with real output and
+figures (`docs/images/`, made from `tests/data/runs`), linked from the README.
+**Left:** CI, a page on the reweighting conventions (sections 6–8), per-command pages.
 
 ### Current state
 - No tests, no CI, one-line README.
