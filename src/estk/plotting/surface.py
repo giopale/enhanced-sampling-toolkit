@@ -14,7 +14,6 @@ from estk.errors import EstError
 from estk.plotting.core import (
     FREE_ENERGY_CMAP,
     INK,
-    INK_SECONDARY,
     PATH_COLOR,
     PROPERTY_CMAP,
     SERIES,
@@ -42,8 +41,9 @@ def plot_surface(
     """Draw one surface on ``ax`` (a new figure if None) and return the axes.
 
     2D: filled map (free energy: light = low, dark = high; above ``vmax`` in the darkest colour;
-    no data left blank) with contour lines every ``contour_step`` (default: a round step giving
-    about 8 lines) and, if given, a ``MinimumEnergyPath`` on top. 1D: the profile, with the error
+    no data left blank) in discrete colour bands between black contour lines every
+    ``contour_step`` (default: a round step giving about 8 lines; 0 for a smooth scale without
+    lines) and, if given, a ``MinimumEnergyPath`` on top. 1D: the profile, with the error
     band if the surface has one.
 
     ``units`` converts free energies for display (``"kJ/mol"``, ``"eV"``, ``"kT"``, ...).
@@ -137,10 +137,15 @@ def plot_surfaces(
 def _colorbar(fig: Figure, mappable: object, ax: object, label: str) -> None:
     bar = fig.colorbar(mappable, ax=ax, pad=0.02, fraction=0.05)
     bar.set_label(label)
-    lo, hi = mappable.get_clim()  # type: ignore[attr-defined]
-    ticks = MaxNLocator(5).tick_values(lo, hi)
-    span = hi - lo
-    bar.set_ticks(ticks[(ticks >= lo - 1e-9 * span) & (ticks <= hi + 1e-9 * span)])
+    levels = np.asarray(getattr(mappable, "levels", []))
+    if 1 < len(levels) <= 11:  # discrete bands: a tick on every contour level
+        ticks = levels
+    else:
+        lo, hi = mappable.get_clim()  # type: ignore[attr-defined]
+        ticks = MaxNLocator(5).tick_values(lo, hi)
+        span = hi - lo
+        ticks = ticks[(ticks >= lo - 1e-9 * span) & (ticks <= hi + 1e-9 * span)]
+    bar.set_ticks(ticks)
     bar.ax.minorticks_off()
     bar.ax.tick_params(direction="out", right=True, left=False)
     bar.outline.set_linewidth(0.5)
@@ -203,17 +208,20 @@ def _plot_map_2d(
     X, Y = surface.grid.mesh()
     masked = np.ma.masked_invalid(values)
     cmap = FREE_ENERGY_CMAP if surface.is_fes else PROPERTY_CMAP
-    levels = np.linspace(lo, hi, 65)
-    ax.contourf(X, Y, masked, levels=levels, cmap=cmap, extend="max" if surface.is_fes else "both")
+    # One colour band between consecutive contour lines.
     if contour_step is None:
         lines = MaxNLocator(8).tick_values(lo, hi)
-        lines = lines[(lines >= lo) & (lines <= hi)]
+        lines = lines[(lines >= lo - 1e-12) & (lines <= hi + 1e-12)]
     elif contour_step > 0:
         lines = np.arange(lo, hi + contour_step / 2, contour_step)
     else:
         lines = np.array([])
+    extend = "max" if surface.is_fes else "both"
     if len(lines) > 1:
-        ax.contour(X, Y, masked, levels=lines, colors=INK_SECONDARY, linewidths=0.3, alpha=0.7)
+        ax.contourf(X, Y, masked, levels=lines, cmap=cmap, extend=extend)
+        ax.contour(X, Y, masked, levels=lines, colors=INK, linewidths=0.4)
+    else:  # no contour lines: a smooth colour scale
+        ax.contourf(X, Y, masked, levels=np.linspace(lo, hi, 65), cmap=cmap, extend=extend)
     names = surface.grid.names
     ax.set_xlabel(axis_label(names[0], labels))
     ax.set_ylabel(axis_label(names[1], labels))

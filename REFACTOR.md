@@ -737,7 +737,8 @@ Notes on what was built:
 - `paper` style: the original JCP style (3.37 in, 6-7 pt text, inward ticks) with editable
   text in PDFs (fonttype 42), tight saving and frameless legends. Any `.mplstyle` file can be
   given instead.
-- **Free-energy maps:** one-hue blue scale for the depth of the basins (lowest F darkest),
+- **Free-energy maps:** one-hue blue scale for the depth of the basins (lowest F darkest), in
+  discrete bands between black contour lines (`--step 0` for a smooth scale without lines),
   white above the colour range and where there is no data; contour lines at a round spacing
   (about 8 by default); colour bar ticks at round values inside the range. Default range 20 kT.
   Property maps use a second one-hue scale (orange).

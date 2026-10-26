@@ -139,3 +139,14 @@ def test_plot_commands(surface, workdir):
     assert (workdir / "combined.mep.png").exists()
     result = runner.invoke(app, ["plot", "path", "combined.mep.dat", "--style", "poster"])
     assert result.exit_code == 1
+
+
+def test_colour_bands_match_contours(surface):
+    ax = plot_surface(surface, vmax=10.0, contour_step=2.0)
+    filled, lines = ax.collections[0], ax.collections[1]
+    np.testing.assert_allclose(filled.levels, [0, 2, 4, 6, 8, 10])
+    np.testing.assert_allclose(lines.levels, filled.levels)
+    assert matplotlib.colors.to_hex(lines.get_edgecolor()[0]) == "#0b0b0b"
+    np.testing.assert_allclose(ax.figure.axes[-1].get_yticks(), filled.levels)
+    smooth = plot_surface(surface, vmax=10.0, contour_step=0)
+    assert len(smooth.collections[0].levels) == 65
