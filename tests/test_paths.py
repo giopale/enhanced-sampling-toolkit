@@ -139,6 +139,53 @@ def test_errors(mb_surface):
         minimum_energy_path(prop)
 
 
+def test_orientation_from_reaction_start(mb_surface):
+    options = {"min_depth_kt": 8.0, "images": 15, "max_steps": 300}
+    default = minimum_energy_path(mb_surface, **options)
+    assert default.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+    assert default.metadata["start_from"] == "smaller x"
+
+    # start at the minimum nearest y = 0 (B), whatever x is
+    oriented = minimum_energy_path(mb_surface, orient={"y": 0.0}, **options)
+    assert oriented.points[0] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
+    assert oriented.metadata["start_from"] == "nearest y=0 (reaction.start)"
+    assert oriented.barrier == pytest.approx(default.reverse_barrier, abs=0.5)
+    # a point given in both CVs, nearer A
+    near_a = minimum_energy_path(mb_surface, orient={"x": -1.0, "y": 1.0}, **options)
+    assert near_a.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+
+    flipped = minimum_energy_path(mb_surface, orient={"y": 0.0}, reverse=True, **options)
+    assert flipped.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+    assert flipped.metadata["start_from"].endswith(", reversed")
+    # CVs not on the surface: ignored; given ends: not reoriented
+    other = minimum_energy_path(mb_surface, orient={"cn": 2.0}, **options)
+    assert other.metadata["start_from"] == "smaller x"
+    given = minimum_energy_path(mb_surface, start=MB_MINIMA["A"][:2], end=MB_MINIMA["B"][:2],
+                                orient={"y": 0.0}, **options)  # fmt: skip
+    assert given.points[0] == pytest.approx(MB_MINIMA["A"][:2], abs=0.011)
+    assert given.metadata["start_from"] == "given"
+
+
+def test_mep_command_uses_reaction_start(mb_surface, tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from estk.cli.main import app
+
+    monkeypatch.chdir(tmp_path)
+    mb_surface.save(tmp_path / "mb.dat")
+    (tmp_path / "estk.yaml").write_text("reaction:\n  start: {y: 0}\n")
+    runner = CliRunner()
+    result = runner.invoke(app, ["mep", "mb.dat", "--min-depth", "8", "--max-steps", "300"])
+    assert result.exit_code == 0, result.output
+    assert "start: nearest y=0 (reaction.start)" in result.output
+    path = MinimumEnergyPath.load(tmp_path / "mb.mep.dat")
+    assert path.points[0] == pytest.approx(MB_MINIMA["B"][:2], abs=0.011)
+
+    (tmp_path / "estk.yaml").write_text("")
+    result = runner.invoke(app, ["mep", "mb.dat", "--min-depth", "8", "--max-steps", "300"])
+    assert "set reaction.start in estk.yaml" in result.output
+
+
 def test_path_file_roundtrip(mb_surface, tmp_path):
     other = Surface(mb_surface.grid, mb_surface.values * 1.1, metadata={"kbt": 2.5})
     path = minimum_energy_path(mb_surface, images=15, max_steps=50, profiles={"run1": other})

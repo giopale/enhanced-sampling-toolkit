@@ -181,7 +181,10 @@ def barrier_convergence(
     }
     step_options = {**options, **fixed_grid}
     if path is None:
-        path = minimum_energy_path(reference.combined, **dict(path_options or {}))
+        orient = project.config.reaction.start or None
+        path = minimum_energy_path(
+            reference.combined, **{"orient": orient, **dict(path_options or {})}
+        )
     if tuple(path.names) != tuple(cvs):
         raise EstError(f"the path is in {path.names}, the surfaces in {tuple(cvs)}")
 

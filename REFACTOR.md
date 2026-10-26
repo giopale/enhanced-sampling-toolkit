@@ -703,8 +703,16 @@ Notes on what was built:
 - **Minima (`--method basins`, default):** persistence on the grid (union-find over the
   sublevel sets): a minimum counts if its basin is at least `--min-depth` kT deep (default 2),
   which ignores noise; the lowest pass to a lower basin is reported too. The two lowest minima
-  are the ends, ordered along the first CV (`--reverse` swaps them); a third (`--minima 3`) is
-  used as a via point. Tested on the Müller-Brown potential (minima, saddle levels, barrier).
+  are the ends; a third (`--minima 3`) is used as a via point.
+- **Direction:** which state is the reactant is a fact about the system, so it lives in
+  estk.yaml: `reaction: {start: {cn: 2.0}}` makes the path start at the end minimum nearest
+  that point (only the CVs named count, distances in units of each CV's grid range), and the
+  barrier is measured from there. `estk mep` and the convergence commands follow it;
+  `--reverse` swaps the ends on top, `--start/--end` override. Without it the start is the
+  minimum with the smaller first CV, and `estk mep` says so and points to `reaction.start`.
+  The reason is saved with the path (`start_from`). On the reference runs the old scripts
+  started at cn ≈ 2 (water), the geometric default at cn ≈ 1, so the "barrier" of the two
+  differed (35.5 vs 46.7 kJ/mol); `reaction.start: {cn: 2.0}` restores the old direction. Tested on the Müller-Brown potential (minima, saddle levels, barrier).
 - `--method split --split-axis cv` is the old method (cut the grid into equal parts along a CV).
 - Instead of clipping at the plot's `vmax`, free energies are capped at the highest finite value
   for the relaxation (`--cap` to choose; the old behaviour is `--cap` = vmax).

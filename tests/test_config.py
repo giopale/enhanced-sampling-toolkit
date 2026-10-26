@@ -191,3 +191,12 @@ def test_model_defaults_are_independent():
     a, b = ProjectConfig(), ProjectConfig()
     a.atoms.type_map[1] = "H"
     assert b.atoms.type_map == {}
+
+
+def test_reaction_start(workdir):
+    (workdir / "estk.yaml").write_text("reaction:\n  start: {cn: 2.0}\n")
+    assert load_config().reaction.start == {"cn": 2.0}
+    (workdir / "estk.yaml").write_text("reaction:\n  end: {cn: 1.0}\n")
+    with pytest.raises(ConfigError):
+        load_config()
+    assert "# reaction:\n#   start: {cn: 2.0}" in config_template()

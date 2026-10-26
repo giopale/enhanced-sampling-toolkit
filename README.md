@@ -42,6 +42,8 @@ estk check opes                                # c(t), zed, neff, nker of each r
 estk check model-deviation --levels 0.2,0.35   # ML potential trust levels
 ```
 
+Paths start, and barriers are measured, from the minimum nearest `reaction.start` in `estk.yaml`
+(e.g. `reaction: {start: {cn: 2.0}}`); without it, from the minimum with the smaller first CV.
 Axis labels come from `estk.yaml` (`cv.d0.label: "d(Ti–O)"`, `cv.d0.units: Å`). Figures use the
 `paper` style (single-column journal figures); `--style slides` or your own `.mplstyle` file
 change it.

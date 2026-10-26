@@ -122,3 +122,16 @@ def test_convergence_commands(project, tmp_path, monkeypatch):
     result = runner.invoke(app, ["convergence", "bandwidth", "d0", "cn", "--cv", "cn"])
     assert result.exit_code == 1
     assert "--values or --range" in result.output
+
+
+def test_reference_path_follows_reaction_start(project, tmp_path):
+    reference = barrier_convergence(project, ["d0", "cn"], "time", [0.2],
+                                    reweight_options=OPTIONS).path  # fmt: skip
+    root = project.config.path.parent
+    config = tmp_path / "estk.yaml"
+    text = (root / "estk.yaml").read_text().replace("pattern: '*'", f"root: {root}\n  pattern: '*'")
+    config.write_text(text + f"reaction:\n  start: {{d0: {reference.points[-1][0]:g}}}\n")
+    oriented = barrier_convergence(Project(config), ["d0", "cn"], "time", [0.2],
+                                   reweight_options=OPTIONS).path  # fmt: skip
+    np.testing.assert_allclose(oriented.points[0], reference.points[-1], atol=1e-6)
+    assert "reaction.start" in oriented.metadata["start_from"]

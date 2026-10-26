@@ -469,6 +469,7 @@ def mep(
         split_axis=split_axis if split_axis is not None else 0,
         min_depth_kt=min_depth,
         reverse=reverse,
+        orient=load_config(_state["config"]).reaction.start or None,
         images=images,
         dt=dt,
         max_steps=max_steps,
@@ -496,6 +497,10 @@ def mep(
     start_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[0], strict=True))
     end_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[-1], strict=True))
     console.print(f"path from ({start_point}) to ({end_point}), {images} images")
+    start_from = path.metadata["start_from"]
+    hint = "; set reaction.start in estk.yaml to choose" if "reaction.start" not in start_from \
+        and start_from != "given" else ""  # fmt: skip
+    console.print(f"start: {start_from}{hint}", style="dim")
     if not path.metadata["converged"]:
         err_console.print(f"[yellow]not converged in {max_steps} steps[/yellow]")
     console.print(f"barrier          {energy(path.barrier)}")

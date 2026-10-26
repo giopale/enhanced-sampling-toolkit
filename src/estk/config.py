@@ -18,6 +18,9 @@ Example::
       cn:
         limits: [0.75, null]   # null: taken from the PLUMED walls, then the data range
 
+    reaction:
+      start: {cn: 2.0}         # paths start at the minimum nearest this point
+
     atoms:
       type_map: {1: H, 2: O, 3: Ti}
       groups:
@@ -152,6 +155,16 @@ class AtomsConfig(_Section):
         return value
 
 
+class ReactionConfig(_Section):
+    """Which way the reaction goes: the path starts at the minimum nearest ``start``.
+
+    ``start`` gives values of some CVs, e.g. ``{cn: 2.0}``; only the CVs of the surface count.
+    The barrier is measured from that end.
+    """
+
+    start: dict[str, float] = Field(default_factory=dict)
+
+
 class PlotConfig(_Section):
     """Default plot settings."""
 
@@ -166,6 +179,7 @@ class ProjectConfig(_Section):
     simulation: SimulationConfig = Field(default_factory=SimulationConfig)
     cv: dict[str, CVConfig] = Field(default_factory=dict)
     atoms: AtomsConfig = Field(default_factory=AtomsConfig)
+    reaction: ReactionConfig = Field(default_factory=ReactionConfig)
     plot: PlotConfig = Field(default_factory=PlotConfig)
 
     _path: Path | None = PrivateAttr(default=None)
@@ -422,6 +436,12 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         "  # groups:",
         "  #   site_A: [311]",
         "  #   site_B: [313, 218]",
+        "",
+        "# Which way the reaction goes: minimum energy paths start at the minimum nearest this",
+        "# point (only the CVs of the surface count) and the barrier is measured from there.",
+        "# Default: the minimum with the smaller value of the first CV.",
+        "# reaction:",
+        "#   start: {cn: 2.0}",
         "",
         "plot:",
         "  style: paper",

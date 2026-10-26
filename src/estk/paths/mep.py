@@ -145,6 +145,7 @@ def minimum_energy_path(
     split_axis: int | str = 0,
     min_depth_kt: float = DEFAULT_MIN_DEPTH_KT,
     reverse: bool = False,
+    orient: Mapping[str, float] | None = None,
     images: int = DEFAULT_IMAGES,
     dt: float = 0.01,
     max_steps: int = 2000,
@@ -163,7 +164,10 @@ def minimum_energy_path(
       second CV, from the first to the last otherwise; a middle part's minimum is used as
       ``via``).
 
-    ``reverse`` swaps start and end. The string has ``images`` images and is relaxed with steps
+    ``orient`` (``reaction.start`` in estk.yaml, e.g. ``{"cn": 2.0}``) makes the path start at
+    the found end nearest that point, measured over the CVs it names in units of each CV's grid
+    range. ``reverse`` then swaps start and end. ``metadata["start_from"]`` says why the path
+    starts where it does. The string has ``images`` images and is relaxed with steps
     of ``dt`` (CV units) for up to ``max_steps``; with ``fixed_ends`` the ends stay on the
     minima. Free energies above ``cap`` (default: the highest finite value) are set to ``cap``
     for the relaxation. ``profiles`` are other surfaces (e.g. each run) to evaluate along the
@@ -177,6 +181,7 @@ def minimum_energy_path(
     min_depth = min_depth_kt * kbt if kbt else 0.0
 
     found: list[Minimum] = []
+    start_from = "given"
     if start is None or end is None:
         found = find_minima(surface, minima, method=method, min_depth=min_depth, split_axis=axis)
         if len(found) < 2:
@@ -192,11 +197,17 @@ def minimum_energy_path(
             ends = sorted(found[:2], key=lambda m: m.point)
             auto_start, auto_end = ends[0].point, ends[1].point
             auto_via = [m.point for m in found[2:3]]
+        start_from = "split order" if method == "split" else f"smaller {names[0]}"
+        if orient:
+            auto_start, auto_end, auto_via, start_from = _orient(
+                surface, orient, auto_start, auto_end, auto_via, start_from
+            )
         start = auto_start if start is None else start
         end = auto_end if end is None else end
         via = via or auto_via
     if reverse:
         start, end, via = end, start, list(via)[::-1]
+        start_from += ", reversed"
     for label, point in (("start", start), ("end", end), *(("via", v) for v in via)):
         if len(point) != len(names):
             raise EstError(f"{label} point needs {len(names)} values ({', '.join(names)})")
@@ -235,6 +246,7 @@ def minimum_energy_path(
         "cap": ceiling,
         "converged": result.converged,
         "steps": result.steps,
+        "start_from": start_from,
     }
     for key in ("kbt", "temperature", "combined", "run", "runs"):
         if key in surface.metadata:
@@ -248,3 +260,30 @@ def minimum_energy_path(
         profiles=profile_values,
         metadata=meta,
     )
+
+
+def _orient(
+    surface: Surface,
+    orient: Mapping[str, float],
+    start: Sequence[float],
+    end: Sequence[float],
+    via: list[Sequence[float]],
+    default: str,
+) -> tuple[Sequence[float], Sequence[float], list[Sequence[float]], str]:
+    """Swap ``start`` and ``end`` if ``end`` is nearer the ``orient`` point."""
+    grid = surface.grid
+    used = [(k, float(orient[n])) for k, n in enumerate(grid.names) if n in orient]
+    if not used:
+        log.warning("reaction.start names none of the CVs %s; ignored", ", ".join(grid.names))
+        return start, end, via, default
+    index = [k for k, _ in used]
+    target_point = np.array([v for _, v in used])
+    span = np.array([grid.upper[k] - grid.lower[k] or 1.0 for k in index])
+
+    def distance(point: Sequence[float]) -> float:
+        return float(np.linalg.norm((np.asarray(point)[index] - target_point) / span))
+
+    target = ", ".join(f"{grid.names[k]}={v:g}" for k, v in used)
+    if distance(end) < distance(start):
+        start, end, via = end, start, via[::-1]
+    return start, end, via, f"nearest {target} (reaction.start)"
