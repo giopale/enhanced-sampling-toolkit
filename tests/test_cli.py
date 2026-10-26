@@ -1,3 +1,4 @@
+import pytest
 from typer.testing import CliRunner
 
 from estk import __version__
@@ -173,3 +174,32 @@ def test_reweight_combines_and_combine_command(workdir):
     result = run("reweight", "d0", "cn", "--points", "6,5", "--combine", "none", "-o", "nocomb")
     assert result.exit_code == 0, result.output
     assert not (workdir / "nocomb" / "combined.dat").exists()
+
+
+def test_mep_command(workdir):
+
+    from estk.grid import Grid
+    from estk.paths import MinimumEnergyPath
+    from estk.surface import Surface
+
+    grid = Grid(("x", "y"), (-1.0, -1.0), (1.0, 1.0), (41, 41))
+    X, Y = grid.mesh()
+    f = 10 * (X**2 - 0.5) ** 2 + 5 * Y**2
+    meta = {"kbt": 1.0, "runs": ["r1", "r2"]}
+    Surface(grid, f - f.min(), metadata=meta).save(workdir / "combined.dat")
+    Surface(grid, 1.1 * (f - f.min()), metadata={"kbt": 1.0}).save(workdir / "r1.dat")
+    Surface(grid, 0.9 * (f - f.min()), metadata={"kbt": 1.0}).save(workdir / "r2.dat")
+
+    result = run("mep", "combined.dat")
+    assert result.exit_code == 0, result.output
+    assert "barrier" in result.output and "spread between runs" in result.output
+    path = MinimumEnergyPath.load(workdir / "combined.mep.dat")
+    assert set(path.profiles) == {"r1", "r2"}
+    assert path.barrier == pytest.approx(10 * 0.25, rel=0.02)
+
+    result = run(
+        "mep", "combined.dat", "--start", "-0.7,0", "--end", "0.7,0", "--no-runs", "-o", "given.dat"
+    )
+    assert result.exit_code == 0, result.output
+    assert MinimumEnergyPath.load(workdir / "given.dat").profiles == {}
+    assert run("mep", "combined.dat", "--start", "1").exit_code == 1

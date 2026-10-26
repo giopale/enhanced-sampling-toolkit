@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
 
+import numpy as np
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -308,6 +309,126 @@ def combine_files(
         table.add_row(run_name, f"{weight:.3f}")
     console.print(table)
     console.print(f"wrote {output} (mode '{chosen}')")
+
+
+@app.command()
+@handle_errors
+def mep(
+    file: Annotated[
+        Path, typer.Argument(help="Free-energy surface, e.g. reweight-d0-cn/combined.dat")
+    ],
+    start: Annotated[str | None, typer.Option(help="Start point, e.g. 2.09,1.98.")] = None,
+    end: Annotated[str | None, typer.Option(help="End point, e.g. 1.86,1.0.")] = None,
+    via: Annotated[
+        list[str] | None, typer.Option(help="Point the initial path goes through (repeat).")
+    ] = None,
+    method: Annotated[
+        str, typer.Option(help="How to find the ends: basins (default) or split (old scripts).")
+    ] = "basins",
+    minima: Annotated[int, typer.Option(help="Minima to use (3: the middle one is a via).")] = 2,
+    split_axis: Annotated[
+        str | None, typer.Option(help="CV to split along with --method split (default: first).")
+    ] = None,
+    min_depth: Annotated[
+        float, typer.Option(help="Minimum depth of a basin, in kT (--method basins).")
+    ] = 2.0,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Swap start and end.")] = False,
+    images: Annotated[int, typer.Option(help="Images (points) along the path.")] = 15,
+    dt: Annotated[float, typer.Option(help="String step, in CV units.")] = 0.01,
+    max_steps: Annotated[int, typer.Option(help="Maximum string steps.")] = 2000,
+    free_ends: Annotated[
+        bool, typer.Option("--free-ends", help="Let the ends move (default: fixed on minima).")
+    ] = False,
+    cap: Annotated[
+        float | None,
+        typer.Option(help="Cap free energies above this (surface units) for the relaxation."),
+    ] = None,
+    runs: Annotated[
+        bool,
+        typer.Option(
+            "--runs/--no-runs",
+            help="Also evaluate the path on the per-run files next to a combined surface.",
+        ),
+    ] = True,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="Output file (default: <file>.mep.dat).")
+    ] = None,
+) -> None:
+    """Minimum energy path between two minima of a free-energy surface, and its barriers."""
+    from estk.paths import find_minima, minimum_energy_path
+    from estk.surface import Surface
+    from estk.units import energy_factor
+
+    surface = Surface.load(file)
+    names = surface.grid.names
+    profiles = {}
+    if runs:
+        for run_name in surface.metadata.get("runs", []):
+            sibling = file.parent / f"{run_name}.dat"
+            if sibling.is_file():
+                profiles[run_name] = Surface.load(sibling)
+    path = minimum_energy_path(
+        surface,
+        start=_parse_point(start, "start", len(names)),
+        end=_parse_point(end, "end", len(names)),
+        via=[_parse_point(v, "via", len(names)) for v in via or []],
+        method=method,
+        minima=minima,
+        split_axis=split_axis if split_axis is not None else 0,
+        min_depth_kt=min_depth,
+        reverse=reverse,
+        images=images,
+        dt=dt,
+        max_steps=max_steps,
+        fixed_ends=not free_ends,
+        cap=cap,
+        profiles=profiles,
+    )
+    target = output or file.with_name(file.stem + ".mep.dat")
+    path.save(target)
+
+    kbt = surface.metadata.get("kbt")
+    to_ev = energy_factor(surface.units) / energy_factor("ev")
+
+    def energy(value: float) -> str:
+        text = f"{value:.3f} {surface.units} = {value * to_ev:.4f} eV"
+        return text + (f" = {value / kbt:.2f} kT" if kbt else "")
+
+    if method == "basins" and start is None and kbt:
+        found = find_minima(surface, None, min_depth=min_depth * kbt)
+        table = Table("minimum", *names, f"F ({surface.units})", "depth (kT)")
+        for i, m in enumerate(found):
+            depth = "global" if m.depth == float("inf") else f"{m.depth / kbt:.2f}"
+            table.add_row(str(i + 1), *[f"{v:.4g}" for v in m.point], f"{m.value:.3f}", depth)
+        console.print(table)
+    start_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[0], strict=True))
+    end_point = ", ".join(f"{n}={v:.4g}" for n, v in zip(names, path.points[-1], strict=True))
+    console.print(f"path from ({start_point}) to ({end_point}), {images} images")
+    if not path.metadata["converged"]:
+        err_console.print(f"[yellow]not converged in {max_steps} steps[/yellow]")
+    console.print(f"barrier          {energy(path.barrier)}")
+    console.print(f"reverse barrier  {energy(path.reverse_barrier)}")
+    console.print(f"reaction         {energy(path.reaction_energy)}")
+    if path.profiles:
+        barriers = path.profile_barriers()
+        values = np.array(list(barriers.values()))
+        listed = ", ".join(f"{k}: {v:.2f}" for k, v in barriers.items())
+        console.print(f"barrier on each run along this path ({surface.units}): {listed}")
+        if len(values) > 1:
+            console.print(f"  spread between runs: {np.std(values):.2f} {surface.units}")
+    console.print(f"wrote {target}")
+
+
+def _parse_point(text: str | None, option: str, ndim: int) -> list[float] | None:
+    if text is None:
+        return None
+    try:
+        values = [float(v) for v in text.split(",")]
+    except ValueError:
+        values = []
+    if len(values) != ndim:
+        raise EstError(f"--{option}: expected {ndim} comma-separated numbers, got {text!r}")
+    return values
 
 
 def _combine_mode(text: str) -> str | None:

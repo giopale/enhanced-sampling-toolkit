@@ -140,7 +140,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 7 | [Combining runs](#7-combining-runs) | done |
 | 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
 | 9 | [Surface file format](#9-surface-file-format) | in progress |
-| 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | todo |
+| 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
 | 11 | [Barrier convergence](#11-barrier-convergence) | todo |
 | 12 | [Surface plotting](#12-surface-plotting) | todo |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | todo |
@@ -624,7 +624,40 @@ reader also loads the old `pot*`/`-AVG` files (any row order). Units stay those 
 
 ## 10. Minimum-energy path (string method)
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/paths/` (`find_minima`, `evolve_string`, `minimum_energy_path`,
+`MinimumEnergyPath` with `barrier`, `reverse_barrier`, `reaction_energy`, `saddle_index`,
+`profiles`, save/load) and `estk mep FILE [--start/--end/--via] [--method basins|split]
+[--minima N] [--split-axis CV] [--min-depth KT] [--reverse] [--images N] [--dt] [--max-steps]
+[--free-ends] [--cap E] [--runs/--no-runs] [-o OUT]`, which writes `<file>.mep.dat` and prints
+the barriers in kJ/mol, eV and kT. Tested in `tests/test_paths.py`.
+
+Notes on what was built:
+- **Same algorithm as the old code**, generalised to any number of CVs (1D gives the profile
+  between two minima): finite-difference gradients interpolated with quadratic splines, Euler
+  steps of `dt` (CV units) normalised by the largest gradient, equal-arc-length
+  redistribution, same convergence threshold. With `--method split` it reproduces the old MEPs
+  on the reference runs to 1e-4 in the CVs (average and runs 000-002; tested against
+  `tests/data/runs/old-mep/`, written by the old `mep` command). Energies along the path agree
+  to 2e-3 eV: they are interpolated bilinearly instead of on a Delaunay triangulation.
+- **Minima (`--method basins`, default):** persistence on the grid (union-find over the
+  sublevel sets): a minimum counts if its basin is at least `--min-depth` kT deep (default 2),
+  which ignores noise; the lowest pass to a lower basin is reported too. The two lowest minima
+  are the ends, ordered along the first CV (`--reverse` swaps them); a third (`--minima 3`) is
+  used as a via point. Tested on the Müller-Brown potential (minima, saddle levels, barrier).
+- `--method split --split-axis cv` is the old method (cut the grid into equal parts along a CV).
+- Instead of clipping at the plot's `vmax`, free energies are capped at the highest finite value
+  for the relaxation (`--cap` to choose; the old behaviour is `--cap` = vmax).
+- **Barriers are explicit:** `barrier` = highest point minus start, `reverse_barrier` = highest
+  point minus end, `reaction_energy` = end minus start. The old plot's "ΔF‡" was the highest
+  point measured from the surface's global minimum, which is the reverse barrier when the path
+  ends in the global minimum (as for the reference data: 0.68 eV vs 0.54 eV from the start).
+- With a combined surface, the path is also evaluated on each run's surface (the `<run>.dat`
+  files next to it): their barriers along the same path and the spread are printed and saved as
+  `fes.<run>` columns.
+- Old bug not reproduced: the old `mep` command wrote the average's path into the last run's
+  folder, overwriting that run's own path (`003/d0-cn-fes-MEP.dat` in the reference data).
 
 ### Current state
 - `stringmethod_custom.py`: `String2D` class (zero-temperature string method on a 2D grid,
@@ -643,7 +676,7 @@ reader also loads the old `pot*`/`-AVG` files (any row order). Units stay those 
 - The barrier isn't returned as a value; it's read off plots or files.
 
 ### Target design
-- `estk.paths.string2d.String2D`: keep the algorithm, clean up the API, add tests on analytic
+- `estk.paths.string`: keep the algorithm, clean up the API, add tests on analytic
   surfaces (e.g. Müller–Brown).
 - `estk.paths.mep`:
   - `find_minima(fes, n=2, *, method="basins"|"split", split=None)`. The default uses the basin
