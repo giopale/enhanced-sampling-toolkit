@@ -5,8 +5,8 @@ free-energy surfaces, minimum-energy paths, barrier convergence and structure ex
 
 The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
 for the plan and the status of each part. At this stage the configuration, reading the simulation
-settings, loading CV data, reweighting, combining runs, minimum energy paths and figures are in
-place.
+settings, loading CV data, reweighting, combining runs, minimum energy paths, figures and barrier
+convergence are in place.
 
 ## Install
 
@@ -33,6 +33,8 @@ estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ eac
 estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat --units eV
 estk plot surface reweight-d0-cn/*.dat --units eV       # all runs side by side
 estk plot path reweight-d0-cn/combined.mep.dat --units eV -o profile.pdf
+estk convergence time d0 cn --until 20 --step 1 --units eV          # barrier vs time
+estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08 --units eV  # vs bandwidth
 ```
 
 Axis labels come from `estk.yaml` (`cv.d0.label: "d(Ti–O)"`, `cv.d0.units: Å`). Figures use the

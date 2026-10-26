@@ -141,7 +141,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
 | 9 | [Surface file format](#9-surface-file-format) | in progress |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
-| 11 | [Barrier convergence](#11-barrier-convergence) | todo |
+| 11 | [Barrier convergence](#11-barrier-convergence) | done |
 | 12 | [Surface plotting](#12-surface-plotting) | done |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | todo |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
@@ -693,7 +693,35 @@ Notes on what was built:
 
 ## 11. Barrier convergence
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/analysis/convergence.py` (`barrier_convergence`, `ConvergenceResult` with
+save/load), `src/estk/plotting/convergence.py` (`plot_convergence`), and
+`estk convergence time CV... --until T [--step S] [--start T0]` and
+`estk convergence bandwidth CV... --cv CV (--values a,b,c | --range LO HI [--num N])`, both with
+the reweighting options (`--points`, `--limits`, `--bandwidth`, `--include-walls`, `--combine`,
+`-j`), the path options (`--path`, `--relax`, `--method`, `--split-axis`, `--min-depth`,
+`--reverse`), `--units`, `--style`, `--save-steps` and `-o DIR`. They write
+`DIR/convergence.dat`, `DIR/convergence.png/.pdf` and `DIR/reference.mep.dat`. Tested in
+`tests/test_convergence.py`.
+
+Notes on what was built:
+- Each step reweights all runs on the **same grid** (that of the reference surface: the full
+  window, or the usual bandwidths) and combines them; no files are moved around and no folder
+  has to exist beforehand.
+- **Path:** by default, as the old code, the energies are read along one fixed path: the MEP of
+  the reference surface, or `--path FILE`. `--relax` relaxes the path again on each surface,
+  with the ends fixed at the reference path's ends.
+- **Reported:** barrier (highest point minus start), reverse barrier and reaction free energy
+  (as in section 10; the old code reported max minus min), each run's barrier along the path
+  and their spread, and the number of frames used. A warning appears if a longer window adds no
+  frames (runs shorter than the window).
+- `--start` drops the beginning of every window (e.g. equilibration). Bandwidth scans keep the
+  other CVs' bandwidths (estk.yaml / `--bandwidth` / Silverman) and use a log x axis for scans
+  spanning a factor 8 or more.
+- The plot: barrier, reverse barrier and ΔF in fixed series colours with their final values at
+  the line ends, the spread between runs as a band around the barrier.
+- `convergence_barrier.py` (the older time scan) is superseded.
 
 ### Current state
 - `convergence_barrier_time.py`: for growing time windows, rewrites `cfg.time_interval`, calls

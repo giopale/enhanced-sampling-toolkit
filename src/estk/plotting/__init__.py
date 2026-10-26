@@ -5,6 +5,7 @@ can be composed and restyled. ``plot_style("paper")`` applies the bundled single
 style; ``"slides"`` is larger; any ``.mplstyle`` file works too.
 """
 
+from estk.plotting.convergence import plot_convergence
 from estk.plotting.core import (
     FREE_ENERGY_CMAP,
     PROPERTY_CMAP,
@@ -22,6 +23,7 @@ __all__ = [
     "SERIES",
     "draw_path",
     "labels_from_config",
+    "plot_convergence",
     "plot_path_profile",
     "plot_style",
     "plot_surface",

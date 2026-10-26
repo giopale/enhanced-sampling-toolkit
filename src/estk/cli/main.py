@@ -531,6 +531,208 @@ def plot_path_command(
     console.print(f"wrote {', '.join(str(t) for t in targets)}")
 
 
+convergence_app = typer.Typer(
+    help="How the barrier converges with time or bandwidth.", no_args_is_help=True
+)
+app.add_typer(convergence_app, name="convergence")
+
+
+def _convergence(
+    names: list[str],
+    parameter: str,
+    values: list[float],
+    *,
+    cv: str | None,
+    start: float | None,
+    time: tuple[float, float] | None,
+    path: Path | None,
+    relax: bool,
+    points: str,
+    limits: list[str] | None,
+    bandwidth: list[str] | None,
+    include_walls: bool,
+    combine: str,
+    jobs: int,
+    method: str,
+    split_axis: str | None,
+    min_depth: float,
+    reverse: bool,
+    units: str | None,
+    style: str,
+    save_steps: bool,
+    output: Path | None,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    from estk.analysis import barrier_convergence
+    from estk.paths import MinimumEnergyPath
+    from estk.plotting import plot_convergence, plot_style
+    from estk.plotting.core import use_agg
+    from estk.project import Project
+
+    mode = _combine_mode(combine)
+    if mode is None:
+        raise EstError("--combine none: the barrier is measured on the combined surface")
+    folder = output or Path("convergence-" + "-".join(names) + f"-{parameter}")
+    project = Project(load_config(_state["config"]))
+    result = barrier_convergence(
+        project,
+        names,
+        parameter,
+        values,
+        cv=cv,
+        start=start,
+        time=time,
+        path=MinimumEnergyPath.load(path) if path else None,
+        relax=relax,
+        reweight_options={
+            "points": _parse_points(points),
+            "limits": _parse_assignments(limits, "limits", pair=True),
+            "bandwidth": _parse_assignments(bandwidth, "bandwidth", pair=False),
+            "include_walls": include_walls,
+            "combine": mode,
+            "jobs": jobs,
+        },
+        path_options={
+            "method": method,
+            "split_axis": split_axis if split_axis is not None else 0,
+            "min_depth_kt": min_depth,
+            "reverse": reverse,
+        },
+        save_steps=folder / "steps" if save_steps else None,
+    )
+    table_path = result.save(folder / "convergence.dat")
+    if result.path is not None:
+        result.path.save(folder / "reference.mep.dat")
+    use_agg()
+    with plot_style(style):
+        ax = plot_convergence(result, units=units)
+        ax.figure.savefig(folder / "convergence.png")
+        ax.figure.savefig(folder / "convergence.pdf")
+        plt.close(ax.figure)
+
+    from estk.plotting.core import energy_scale
+
+    factor, unit_label = energy_scale(result.units, units, result.metadata.get("kbt"))
+    table = Table(result.label, "frames", "barrier", "reverse", "reaction", "spread")
+    for row in result.rows:
+        table.add_row(
+            f"{row.value:g}",
+            str(row.frames),
+            *[f"{v * factor:.3f}" for v in (row.barrier, row.reverse_barrier,
+                                             row.reaction_energy, row.spread)],
+        )  # fmt: skip
+    console.print(table)
+    console.print(f"energies in {unit_label}; wrote {table_path} and convergence.png/.pdf")
+
+
+_RELAX = Annotated[
+    bool, typer.Option("--relax", help="Relax the path on each surface (default: fixed path).")
+]
+_PATH = Annotated[Path | None, typer.Option("--path", help="Reference path (default: computed).")]
+
+
+@convergence_app.command("time")
+@handle_errors
+def convergence_time(
+    names: Annotated[list[str], typer.Argument(help="CVs of the grid, e.g. d0 cn.")],
+    until: Annotated[float, typer.Option(help="End of the last time window, in ns.")],
+    step: Annotated[float, typer.Option(help="Spacing of the window ends, in ns.")] = 1.0,
+    start: Annotated[
+        float | None, typer.Option(help="Start of every window, in ns (drop equilibration).")
+    ] = None,
+    path: _PATH = None,
+    relax: _RELAX = False,
+    points: Annotated[str, typer.Option(help="Grid points (100 or 100,80).")] = "100",
+    limits: Annotated[list[str] | None, typer.Option(help="Grid limits, e.g. d0=1.5,2.2.")] = None,
+    bandwidth: Annotated[list[str] | None, typer.Option(help="Bandwidth, e.g. d0=0.02.")] = None,
+    include_walls: Annotated[bool, typer.Option("--include-walls")] = False,
+    combine: Annotated[str, typer.Option(help="probability, equal or legacy.")] = "probability",
+    jobs: Annotated[int, typer.Option("--jobs", "-j")] = 1,
+    method: Annotated[str, typer.Option(help="Minima for the path: basins or split.")] = "basins",
+    split_axis: Annotated[str | None, typer.Option(help="CV to split along.")] = None,
+    min_depth: Annotated[float, typer.Option(help="Minimum basin depth, kT.")] = 2.0,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Swap the path's ends.")] = False,
+    units: UnitsOption = None,
+    style: StyleOption = "paper",
+    save_steps: Annotated[
+        bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
+    ] = False,
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output folder.")] = None,
+) -> None:
+    """Barrier against the length of the simulation (windows start..step, ..., start..until)."""
+    if step <= 0 or until <= 0:
+        raise EstError("--until and --step must be positive")
+    first = (start or 0.0) + step
+    values = list(np.arange(first, until + step / 2, step))
+    if not values:
+        raise EstError("no time windows: --until must be after --start")
+    _convergence(
+        names, "time", values, cv=None, start=start, time=None, path=path, relax=relax,
+        points=points, limits=limits, bandwidth=bandwidth, include_walls=include_walls,
+        combine=combine, jobs=jobs, method=method, split_axis=split_axis, min_depth=min_depth,
+        reverse=reverse, units=units, style=style, save_steps=save_steps, output=output,
+    )  # fmt: skip
+
+
+@convergence_app.command("bandwidth")
+@handle_errors
+def convergence_bandwidth(
+    names: Annotated[list[str], typer.Argument(help="CVs of the grid, e.g. d0 cn.")],
+    cv: Annotated[str, typer.Option(help="CV whose bandwidth is varied.")],
+    values: Annotated[
+        str | None, typer.Option(help="Bandwidths, e.g. 0.005,0.01,0.02,0.04.")
+    ] = None,
+    range_: Annotated[
+        tuple[float, float] | None,
+        typer.Option("--range", help="Smallest and largest bandwidth (with --num)."),
+    ] = None,
+    num: Annotated[int, typer.Option(help="Bandwidths in --range (log-spaced).")] = 10,
+    time: Annotated[
+        tuple[float, float] | None, typer.Option(help="Time window in ns (default: all).")
+    ] = None,
+    path: _PATH = None,
+    relax: _RELAX = False,
+    points: Annotated[str, typer.Option(help="Grid points (100 or 100,80).")] = "100",
+    limits: Annotated[list[str] | None, typer.Option(help="Grid limits, e.g. d0=1.5,2.2.")] = None,
+    bandwidth: Annotated[
+        list[str] | None, typer.Option(help="Bandwidth of the other CVs, e.g. cn=0.03.")
+    ] = None,
+    include_walls: Annotated[bool, typer.Option("--include-walls")] = False,
+    combine: Annotated[str, typer.Option(help="probability, equal or legacy.")] = "probability",
+    jobs: Annotated[int, typer.Option("--jobs", "-j")] = 1,
+    method: Annotated[str, typer.Option(help="Minima for the path: basins or split.")] = "basins",
+    split_axis: Annotated[str | None, typer.Option(help="CV to split along.")] = None,
+    min_depth: Annotated[float, typer.Option(help="Minimum basin depth, kT.")] = 2.0,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Swap the path's ends.")] = False,
+    units: UnitsOption = None,
+    style: StyleOption = "paper",
+    save_steps: Annotated[
+        bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
+    ] = False,
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output folder.")] = None,
+) -> None:
+    """Barrier against the kernel bandwidth of one CV."""
+    if values is not None:
+        try:
+            scan = [float(v) for v in values.split(",") if v.strip()]
+        except ValueError:
+            raise EstError(f"--values: expected numbers like 0.01,0.02, got {values!r}") from None
+    elif range_ is not None:
+        lo, hi = range_
+        if not 0 < lo < hi:
+            raise EstError("--range needs 0 < smallest < largest")
+        scan = list(np.geomspace(lo, hi, num))
+    else:
+        raise EstError("give the bandwidths with --values or --range")
+    _convergence(
+        names, "bandwidth", scan, cv=cv, start=None, time=time, path=path, relax=relax,
+        points=points, limits=limits, bandwidth=bandwidth, include_walls=include_walls,
+        combine=combine, jobs=jobs, method=method, split_axis=split_axis, min_depth=min_depth,
+        reverse=reverse, units=units, style=style, save_steps=save_steps, output=output,
+    )  # fmt: skip
+
+
 def _parse_point(text: str | None, option: str, ndim: int) -> list[float] | None:
     if text is None:
         return None
