@@ -30,6 +30,7 @@ estk reweight d0 cn -j 4     # per-run surfaces + all runs combined -> reweight-
 estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
+estk info reweight-d0-cn/combined.dat  # grid, units and how a surface or path was made
 estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat --units eV
 estk plot surface reweight-d0-cn/*.dat --units eV       # all runs side by side
 estk plot path reweight-d0-cn/combined.mep.dat --units eV -o profile.pdf
@@ -42,6 +43,10 @@ estk check model-deviation --levels 0.2,0.35   # ML potential trust levels
 Axis labels come from `estk.yaml` (`cv.d0.label: "d(Ti–O)"`, `cv.d0.units: Å`). Figures use the
 `paper` style (single-column journal figures); `--style slides` or your own `.mplstyle` file
 change it.
+
+Surfaces and paths are text files (PLUMED grid layout) whose header records how they were made:
+temperature, bandwidths, time range, runs and weights, estk version and the command.
+`--compress` (or any output name ending in `.gz`) writes them gzip-compressed.
 
 From Python:
 
@@ -58,6 +63,10 @@ both = result.combined                 # all runs; .error = spread between runs
 
 from estk.paths import minimum_energy_path
 path = minimum_energy_path(both)       # .points, .energies, .barrier, .reverse_barrier
+path.save("combined.mep.dat")
+
+import estk
+fes = estk.load("reweight-d0-cn/combined.dat")   # a Surface, or a path for a .mep.dat file
 
 from estk.plotting import plot_style, plot_surface, plot_path_profile
 with plot_style("paper"):

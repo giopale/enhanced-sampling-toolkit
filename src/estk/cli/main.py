@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, TypeVar
@@ -82,6 +83,10 @@ def main(
     _state["verbosity"] = 1 if verbose else -1 if quiet else 0
     _state["config"] = config
     setup_cli_logging(_state["verbosity"])
+    from estk.io.textfile import set_command
+
+    # Recorded in the files written (estk.command); not when called from Python (e.g. tests).
+    set_command(["estk", *sys.argv[1:]] if Path(sys.argv[0]).name == "estk" else None)
 
 
 @app.command()
@@ -224,6 +229,9 @@ def reweight(
             "--output", "-o", help="Output folder (default: reweight-<cvs>[-<property>])."
         ),
     ] = None,
+    compress: Annotated[
+        bool, typer.Option("--compress", help="Write gzip-compressed files (.dat.gz).")
+    ] = False,
 ) -> None:
     """Reweight every run to a free-energy surface (or property average) on a common grid.
 
@@ -248,7 +256,7 @@ def reweight(
         combine=mode,
     )
     folder = output or Path("reweight-" + "-".join([*names, *([prop] if prop else [])]))
-    paths = result.save(folder)
+    paths = result.save(folder, compress=compress)
 
     grid = result.grid
     for name, lo, hi, n in zip(grid.names, grid.lower, grid.upper, grid.points, strict=True):
@@ -290,6 +298,7 @@ def combine_files(
     force: Annotated[bool, typer.Option("--force", help="Overwrite the output file.")] = False,
 ) -> None:
     """Combine per-run surfaces (e.g. reweight-d0-cn/0*.dat) into one, with another mode."""
+    from estk.io.textfile import base_name
     from estk.reweight import combine
     from estk.surface import Surface
 
@@ -300,10 +309,10 @@ def combine_files(
         raise EstError(f"{output} already exists (use --force to overwrite)")
     surfaces = {}
     for path in files:
-        if path.name == "combined.dat":
+        if base_name(path) == "combined":
             continue
         surface = Surface.load(path)
-        surfaces[str(surface.metadata.get("run", path.stem))] = surface
+        surfaces[str(surface.metadata.get("run", base_name(path)))] = surface
     result = combine(surfaces, mode=chosen)
     result.save(output)
     table = Table("run", "weight")
@@ -357,6 +366,7 @@ def mep(
     ] = None,
 ) -> None:
     """Minimum energy path between two minima of a free-energy surface, and its barriers."""
+    from estk.io.textfile import base_name
     from estk.paths import find_minima, minimum_energy_path
     from estk.surface import Surface
     from estk.units import energy_factor
@@ -366,7 +376,7 @@ def mep(
     profiles = {}
     if runs:
         for run_name in surface.metadata.get("runs", []):
-            sibling = file.parent / f"{run_name}.dat"
+            sibling = file.parent / (run_name + file.name[len(base_name(file)) :])
             if sibling.is_file():
                 profiles[run_name] = Surface.load(sibling)
     path = minimum_energy_path(
@@ -386,7 +396,7 @@ def mep(
         cap=cap,
         profiles=profiles,
     )
-    target = output or file.with_name(file.stem + ".mep.dat")
+    target = output or file.with_name(base_name(file) + ".mep.dat")
     path.save(target)
 
     kbt = surface.metadata.get("kbt")
@@ -431,6 +441,61 @@ OutputsOption = Annotated[
     list[Path] | None,
     typer.Option("--output", "-o", help="Output file(s); the extension sets the format (repeat)."),
 ]
+
+
+@app.command()
+@handle_errors
+def info(
+    files: Annotated[list[Path], typer.Argument(help="Surface or path files written by estk.")],
+) -> None:
+    """What a surface or path file holds: grid or images, units, and how it was made."""
+    import estk
+    from estk.paths import MinimumEnergyPath
+
+    for k, file in enumerate(files):
+        if k:
+            console.print()
+        item = estk.load(file)
+        if isinstance(item, MinimumEnergyPath):
+            console.print(f"[bold]{file}[/bold]: path on {', '.join(item.names)}, "
+                          f"{len(item.energies)} images", highlight=False)  # fmt: skip
+            console.print(f"barrier {item.barrier:.3f}, reverse barrier "
+                          f"{item.reverse_barrier:.3f}, reaction {item.reaction_energy:.3f} "
+                          f"({item.units})")  # fmt: skip
+            if item.profiles:
+                console.print(f"also along the path: {', '.join(item.profiles)}")
+        else:
+            kind = "free energy" if item.is_fes else f"average of {item.quantity}"
+            console.print(f"[bold]{file}[/bold]: {kind}, {item.grid.ndim}-D grid", highlight=False)
+            table = Table("CV", "min", "max", "points", "spacing")
+            grid = item.grid
+            rows = zip(grid.names, grid.lower, grid.upper, grid.points, strict=True)
+            for name, lo, hi, n in rows:
+                spacing = (hi - lo) / (n - 1) if n > 1 else 0.0
+                table.add_row(name, f"{lo:g}", f"{hi:g}", str(n), f"{spacing:.4g}")
+            console.print(table)
+            finite = item.values[np.isfinite(item.values)]
+            units = f" {item.units}" if item.units else ""
+            if finite.size:
+                console.print(f"values {finite.min():.4g} to {finite.max():.4g}{units}, "
+                              f"{finite.size} of {item.values.size} points with data")  # fmt: skip
+            if item.error is not None:
+                console.print("with error estimate")
+        meta = Table("key", "value", show_header=False, box=None)
+        for key, value in item.metadata.items():
+            meta.add_row(key, _format_metadata(value))
+        console.print(meta)
+
+
+def _format_metadata(value: Any, width: int = 100) -> str:
+    import json
+
+    from estk.io.textfile import jsonable
+
+    if isinstance(value, str):
+        return value
+    text = json.dumps(jsonable(value))
+    return text if len(text) <= width else text[: width - 3] + "..."
 
 
 @plot_app.command("surface")

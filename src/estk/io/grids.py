@@ -13,23 +13,22 @@ Format written by estk::
     x y value [error]
 
 The first CV varies fastest, with a blank line after each sweep of it (as in PLUMED grids).
-The reader also accepts the files of the original scripts (``# FIELDS``/``# SET`` header, any
-row order, ``num_grid_points_*`` or ``nbins_*``).
+``estk.version`` and ``estk.command`` record what wrote the file. Names ending in ``.gz`` are
+gzip-compressed. The reader also accepts the files of the original scripts (``# FIELDS``/``# SET``
+header, any row order, ``num_grid_points_*`` or ``nbins_*``).
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from estk.errors import EstError, MissingFileError
+from estk.errors import EstError
 from estk.grid import Grid
+from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
 from estk.surface import Surface
-
-_PREFIX = "estk."
 
 
 def write_surface(surface: Surface, path: Path) -> Path:
@@ -47,9 +46,7 @@ def write_surface(surface: Surface, path: Path) -> Path:
             f"#! SET num_grid_points_{name} {n}",
             f"#! SET periodic_{name} false",
         ]
-    header.append(f"#! SET {_PREFIX}units {json.dumps(surface.units)}")
-    for key, value in surface.metadata.items():
-        header.append(f"#! SET {_PREFIX}{key} {json.dumps(_jsonable(value))}")
+    header += metadata_lines({"units": surface.units, **surface.metadata})
 
     # Fortran order = first CV fastest.
     columns = [m.reshape(-1, order="F") for m in grid.mesh()]
@@ -62,7 +59,7 @@ def write_surface(surface: Surface, path: Path) -> Path:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     sweep = grid.points[0]
-    with open(path, "w") as f:
+    with open_text(path, "w") as f:
         f.write("\n".join(header) + "\n")
         for start in range(0, len(data), sweep):
             np.savetxt(f, data[start : start + sweep], fmt="%.10g")
@@ -72,21 +69,7 @@ def write_surface(surface: Surface, path: Path) -> Path:
 
 
 def read_surface(path: Path) -> Surface:
-    if not path.is_file():
-        raise MissingFileError(f"surface file not found: {path}")
-    fields: list[str] = []
-    sets: dict[str, str] = {}
-    with open(path, errors="replace") as f:
-        for line in f:
-            if not line.startswith("#"):
-                continue
-            words = line.lstrip("#!").split(maxsplit=2)
-            if len(words) >= 2 and words[0] == "FIELDS":
-                fields = line.lstrip("#!").split()[1:]
-            elif len(words) == 3 and words[0] == "SET":
-                sets[words[1]] = words[2].strip()
-    if not fields:
-        raise EstError(f"{path}: no FIELDS header")
+    fields, sets = read_header(path)
 
     names = [f for f in fields if f"num_grid_points_{f}" in sets or f"nbins_{f}" in sets] or fields[
         :2
@@ -127,12 +110,12 @@ def read_surface(path: Path) -> Surface:
     metadata: dict[str, Any] = {}
     units = "kj/mol"
     for key, raw in sets.items():
-        if key.startswith(_PREFIX):
-            value = json.loads(raw)
-            if key == f"{_PREFIX}units":
+        if key.startswith(PREFIX):
+            value = decode(raw)
+            if key == f"{PREFIX}units":
                 units = value
             else:
-                metadata[key[len(_PREFIX) :]] = value
+                metadata[key[len(PREFIX) :]] = value
         elif not key.startswith(("min_", "max_", "num_grid_points_", "nbins_", "periodic_")):
             metadata[key] = _number_or_text(raw)
     return Surface(
@@ -144,22 +127,6 @@ def read_surface(path: Path) -> Surface:
         metadata=metadata,
         fes=fes,
     )
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    if isinstance(value, float) and not np.isfinite(value):
-        return str(value)
-    return value
 
 
 def _number_or_text(raw: str) -> Any:

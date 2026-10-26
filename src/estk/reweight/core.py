@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 log = get_logger(__name__)
 
 DEFAULT_POINTS = 100
-COMBINED_NAME = "combined.dat"
+COMBINED_STEM = "combined"  # <folder>/combined.dat
 
 
 def log_weights(bias: np.ndarray, kbt: float) -> np.ndarray:
@@ -116,6 +116,12 @@ def reweight_table(
         "log_weight_total": log_total,
         "log_weight_max": float(raw.max()),
         "walls_in_bias": table.report.walls_in_bias,
+        "time_range_ns": [
+            round(float(table.time[0]) / 1000, 9),
+            round(float(table.time[-1]) / 1000, 9),
+        ]
+        if len(table)
+        else None,
     }
     meta.update(metadata or {})
 
@@ -151,12 +157,14 @@ class ReweightResult:
     tables: dict[str, CVTable] = field(default_factory=dict)
     combined: Surface | None = None
 
-    def save(self, folder: Path | str) -> list[Path]:
-        """Write ``<folder>/<run>.dat`` for each run and ``<folder>/combined.dat``."""
+    def save(self, folder: Path | str, *, compress: bool = False) -> list[Path]:
+        """Write ``<folder>/<run>.dat`` for each run and ``<folder>/combined.dat`` (``.dat.gz``,
+        gzip-compressed, with ``compress``)."""
         folder = Path(folder)
-        paths = [s.save(folder / f"{name}.dat") for name, s in self.surfaces.items()]
+        suffix = ".dat.gz" if compress else ".dat"
+        paths = [s.save(folder / f"{name}{suffix}") for name, s in self.surfaces.items()]
         if self.combined is not None:
-            paths.append(self.combined.save(folder / COMBINED_NAME))
+            paths.append(self.combined.save(folder / f"{COMBINED_STEM}{suffix}"))
         return paths
 
 

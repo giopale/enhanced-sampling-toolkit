@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+import estk
 from estk.errors import EstError, MissingLimitsError
 from estk.grid import Grid, resolve_limits
 from estk.io.colvar import CVTable
@@ -383,6 +384,7 @@ def test_surface_roundtrip(tmp_path):
     back = Surface.load(path)
     assert back.grid == grid
     np.testing.assert_array_equal(back.values, values)
+    assert back.metadata.pop("version") == estk.__version__
     assert back.metadata == {"run": "000", "bandwidth": {"d0": 0.02}}
     assert back.units == "kj/mol"
 

@@ -121,8 +121,8 @@ print(path.barrier)
 ```
 
 ```bash
-estk reweight --cvs d0 cn --time 0 20            # -> d0-cn.fes.h5
-estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
+estk reweight d0 cn --time 0 20                  # -> reweight-d0-cn/{000,...,combined}.dat
+estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.mep.dat
 ```
 
 ---
@@ -139,7 +139,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 6 | [Frame weights and KDE reweighting](#6-frame-weights-and-kde-reweighting) | done |
 | 7 | [Combining runs](#7-combining-runs) | done |
 | 8 | [Bandwidth selection](#8-bandwidth-selection) | in progress |
-| 9 | [Surface file format](#9-surface-file-format) | in progress |
+| 9 | [Surface file format](#9-surface-file-format) | done |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
 | 11 | [Barrier convergence](#11-barrier-convergence) | done |
 | 12 | [Surface plotting](#12-surface-plotting) | done |
@@ -179,7 +179,8 @@ need them); delete the dead files and `to_refactor/` once their logic has moved.
 
 ### Target design
 - `pyproject.toml` with `src/estk/` layout and a console script `estk = estk.cli.main:app`.
-- Core dependencies: numpy, scipy, matplotlib, pydantic, typer, rich, h5py.
+- Core dependencies: numpy, scipy, matplotlib, pydantic, typer, rich, pyyaml (no h5py: the
+  output files are text, section 9).
 - Optional extras: `estk[structures]` (ase), `estk[pt]` (MDAnalysis, ectoolkits).
 - Code modules arranged as in the [package layout](#package-layout); relative imports inside the
   package.
@@ -475,7 +476,7 @@ Notes on what was built:
 - `Project.reweight(cvs, *, property=None, time=None, grid=None, bandwidth=None)` runs each
   run in parallel and returns per-run surfaces plus the combined one (section 7).
 - CLI: `estk reweight --cvs d0 cn [--property max_devi_f --source model_devi.out] [--time 0 20]
-  [--grid 100 100] [--bandwidth 0.02 0.03] [-o d0-cn.fes.h5]`.
+  [--grid 100 100] [--bandwidth 0.02 0.03] [-o folder]`.
 - Port `calc_c_of_t` only if it's still needed; otherwise drop `ectoolkits_reweight.py`.
 - Validate the new code against the current outputs on one real dataset before deleting the old
   modules (regression test, section 18).
@@ -586,14 +587,40 @@ Silverman, recorded with their source in each surface's metadata.
 
 ## 9. Surface file format
 
-**Status:** in progress
+**Status:** done
 
 **Done:** `Surface` (one class for free energies and property averages, with `quantity`,
-`units`, `error`, `metadata`) and `src/estk/io/grids.py`. Instead of HDF5, the files are
-PLUMED-style text grids (first CV fastest, blank line between sweeps) with the metadata as
-`#! SET estk.<key> <JSON>` header lines: readable, diff-able, no extra dependency, and the
-reader also loads the old `pot*`/`-AVG` files (any row order). Units stay those of the bias.
-**Left:** path (MEP) files with section 10; `--units eV` for display.
+`units`, `error`, `metadata`, and `fes` for a property surface), `src/estk/io/grids.py`,
+`src/estk/io/textfile.py` (shared by surface and path files), `MinimumEnergyPath.save/load`,
+`estk.load(path)` (a surface or a path, from the header) and `estk info FILE...`. Tested in
+`tests/test_files.py` and `tests/test_reweight.py`.
+
+Notes on what was built:
+- **Text, not HDF5.** Surfaces are PLUMED-style text grids (first CV fastest, blank line
+  between sweeps), paths are columns `s <cvs> fes [fes.err] [fes.<run>...]`; the metadata are
+  `#! SET estk.<key> <JSON>` header lines. Readable with `less`, diff-able, loadable with
+  `np.loadtxt` or any plotting tool, no extra dependency. Values keep 10 significant digits.
+  For size, a name ending in `.gz` is gzip-compressed text (`estk reweight --compress`, or any
+  `-o x.dat.gz`): a 100×100 grid goes from 352 kB to about 96 kB. Everything that reads these
+  files reads `.gz` too.
+- **Metadata written:** every file records `version` and, when written by the CLI, the
+  `command`; a file loaded and saved again gets the provenance of the new save, never the old
+  one. Per-run surfaces: run, frames, effective frames, temperature, kT, bias factor, bandwidths
+  and where each came from, the time window asked for and the time range of the frames used
+  (`time_range_ns`), whether walls are in the bias, the log of the total weight and the offset
+  removed from the free energy. Combined surfaces: mode, runs and their weights, and each run's
+  bandwidths, effective frames and time range (`run_*`). Paths: barrier, reverse barrier,
+  reaction energy, the minima, the string settings and whether it converged.
+- **Units:** energies stay in the units of the bias (kJ/mol for these runs) in every file and
+  are converted only for display (`--units eV/kT/...` of the plot and convergence commands;
+  `estk mep` prints kJ/mol, eV and kT).
+- **Old files:** the reader loads the original scripts' `pot*`/`-AVG` grids (`# FIELDS` header,
+  any row order); their `SET log_weight_total` ends up in the metadata. The old MEP files have
+  no header and are only read by the regression test.
+- `estk info` prints the grid (limits, points, spacing), the range of values and all metadata,
+  or for a path its images, barriers and the runs along it.
+- The planned `estk export --plumed` is not needed: the native format is already the PLUMED
+  grid layout.
 
 ### Current state
 - `write_fes` writes a PLUMED-like text grid: a `FIELDS` line, `SET min_/max_/num_grid_points_`
@@ -614,8 +641,8 @@ reader also loads the old `pot*`/`-AVG` files (any row order). Units stay those 
 - `FreeEnergySurface` / `PropertySurface` (in `estk/surface.py`) hold: `grid`, `values`,
   `error`, `units`, `cvs` (names + labels), and `metadata` (temperature, bandwidths, time window,
   runs and their weights, estk version, the command that produced it).
-- Native format: one HDF5 file (`*.fes.h5`, `*.prop.h5`, `*.mep.h5`) with datasets plus
-  metadata as attributes. `Surface.save(path)` / `estk.load(path)`.
+- Native format: one self-describing file per surface or path, with its metadata.
+  `Surface.save(path)` / `estk.load(path)`.
 - Export / import of the PLUMED text grid (`estk export --plumed`, `estk.load("fes.dat")`) so
   existing files and PLUMED tools keep working.
 - Energies stored in one unit (kJ/mol), converted only for display (`--units eV`).
@@ -686,8 +713,8 @@ Notes on what was built:
   - `Path` holds the points, the arc length, the energy profile, and `barrier`,
     `reverse_barrier`, `saddle`.
 - `FreeEnergySurface.mep(...)` as a shortcut.
-- CLI: `estk mep d0-cn.fes.h5 [--minima 2] [--start x y] [--end x y] [--via x y] [--plot]`
-  prints the barrier and writes `d0-cn.mep.h5`.
+- CLI: `estk mep combined.dat [--minima 2] [--start x y] [--end x y] [--via x y] [--plot]`
+  prints the barrier and writes `combined.mep.dat`.
 
 ---
 
@@ -801,7 +828,7 @@ Notes on what was built:
 - `plot_surfaces(surfaces, ncols=2)` for the per-run + average grid.
 - Labels come from `cv.<name>.label` in `estk.yaml`; the colour-bar label from the surface units.
 - Bundled styles (`paper`, `slides`, `notebook`), plus any user `.mplstyle` path.
-- CLI: `estk plot surface d0-cn.fes.h5 [--path d0-cn.mep.h5] [--levels 0 0.8 0.1]
+- CLI: `estk plot surface combined.dat [--path combined.mep.dat] [--levels 0 0.8 0.1]
   [--style paper] [-o fes.png]`.
 
 ---
@@ -826,7 +853,7 @@ Notes on what was built:
 - `estk.analysis.along_path.average_along_path(project, path, quantities) -> pandas.DataFrame`
   using `point_kernel_weights` from section 6 at each path point, with the error between runs.
 - `estk.plotting.path.plot_along_path(df, quantities, ...)`.
-- CLI: `estk along-path d0-cn.mep.h5 --quantities dOOliq_min theta1 theta2 [-o cvs.png]`.
+- CLI: `estk along-path combined.mep.dat --quantities dOOliq_min theta1 theta2 [-o cvs.png]`.
 - Delete `plot_cvs_along_mep.py.bak`.
 
 ---
@@ -864,8 +891,8 @@ Notes on what was built:
     (xyz/extxyz/lammps-data via ase) or `.to_csv()`.
 - Basin labelling (`label_basins`) moves to `estk.paths.mep` / a shared module so the MEP minima
   search can use it.
-- CLI: `estk structures near d0-cn.fes.h5 --point 1.99 1.33 [--probability 0.9] [--save out.xyz]`
-  and `estk structures basin d0-cn.fes.h5 --isovalue 0.1 --point 2.0 1.0 [--sample 400]`.
+- CLI: `estk structures near combined.dat --point 1.99 1.33 [--probability 0.9] [--save out.xyz]`
+  and `estk structures basin combined.dat --isovalue 0.1 --point 2.0 1.0 [--sample 400]`.
 - Delete `find_structures_bin.py`.
 
 ---

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +10,8 @@ from typing import Any
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
-from estk.errors import EstError, MissingFileError
+from estk.errors import EstError
+from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
 from estk.logging import get_logger
 from estk.paths.minima import Minimum, find_minima
 from estk.paths.string import evolve_string, initial_string
@@ -87,10 +87,9 @@ class MinimumEnergyPath:
             "reaction_energy": self.reaction_energy,
             **self.metadata,
         }
-        header = [f"#! FIELDS {' '.join(fields)}"]
-        header += [f"#! SET estk.{k} {json.dumps(_jsonable(v))}" for k, v in meta.items()]
+        header = [f"#! FIELDS {' '.join(fields)}", *metadata_lines(meta)]
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        with open_text(path, "w") as f:
             f.write("\n".join(header) + "\n")
             np.savetxt(f, np.column_stack(columns), fmt="%.10g")
         return path
@@ -98,19 +97,10 @@ class MinimumEnergyPath:
     @classmethod
     def load(cls, path: Path | str) -> MinimumEnergyPath:
         path = Path(path)
-        if not path.is_file():
-            raise MissingFileError(f"path file not found: {path}")
-        fields: list[str] = []
-        meta: dict[str, Any] = {}
-        with open(path) as f:
-            for line in f:
-                if not line.startswith("#!"):
-                    continue
-                words = line[2:].split(maxsplit=2)
-                if words[0] == "FIELDS":
-                    fields = line[2:].split()[1:]
-                elif words[0] == "SET" and words[1].startswith("estk."):
-                    meta[words[1][5:]] = json.loads(words[2])
+        fields, sets = read_header(path)
+        if "fes" not in fields or fields[0] != "s":
+            raise EstError(f"{path}: not a path file (FIELDS {' '.join(fields)})")
+        meta = {k[len(PREFIX) :]: decode(v) for k, v in sets.items() if k.startswith(PREFIX)}
         data = np.loadtxt(path, comments="#", ndmin=2)
         i_fes = fields.index("fes")
         names = tuple(fields[1:i_fes])
@@ -258,15 +248,3 @@ def minimum_energy_path(
         profiles=profile_values,
         metadata=meta,
     )
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, float) and not np.isfinite(value):
-        return str(value)
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(v) for v in value]
-    return value

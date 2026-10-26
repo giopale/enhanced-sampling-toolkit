@@ -76,6 +76,7 @@ def combine(
     for key in ("temperature", "energy_units", "time_window_ns", "walls_in_bias"):
         if key in first.metadata:
             meta[key] = first.metadata[key]
+    meta.update(_per_run(runs, items))
 
     if first.is_fes:
         free_energy = -kbt * log_total
@@ -115,6 +116,15 @@ def combine(
     )
 
 
+def _per_run(runs: list[str], items: list[Surface]) -> dict[str, Any]:
+    """What differs between the runs, keyed by run (e.g. ``run_bandwidth``)."""
+    meta = {}
+    for key in ("bandwidth", "effective_frames", "time_range_ns"):
+        if all(key in s.metadata for s in items):
+            meta[f"run_{key}"] = {r: s.metadata[key] for r, s in zip(runs, items, strict=True)}
+    return meta
+
+
 def _legacy(runs: list[str], items: list[Surface], log_totals: np.ndarray) -> Surface:
     first = items[0]
     old_log_totals = log_totals - np.array([_meta(s, "log_weight_max") for s in items])
@@ -134,6 +144,7 @@ def _legacy(runs: list[str], items: list[Surface], log_totals: np.ndarray) -> Su
     for key in ("temperature", "energy_units", "time_window_ns"):
         if key in first.metadata:
             meta[key] = first.metadata[key]
+    meta.update(_per_run(runs, items))
     return Surface(
         grid=first.grid,
         values=average,
