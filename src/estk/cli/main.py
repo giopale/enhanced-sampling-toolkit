@@ -447,7 +447,12 @@ def plot_surface_command(
         float | None, typer.Option(help="Top of the colour scale (default 20 kT).")
     ] = None,
     step: Annotated[
-        float | None, typer.Option(help="Spacing of the contour lines (0: none).")
+        float | None,
+        typer.Option(help="Contour lines at fixed intervals from 0, e.g. 0.1 (0: no lines)."),
+    ] = None,
+    levels: Annotated[
+        str | None,
+        typer.Option(help="Contour levels, e.g. 0,0.1,0.2,0.4 (also sets the colour range)."),
     ] = None,
     ncols: Annotated[int, typer.Option(help="Columns of small multiples.")] = 3,
     contour_labels: Annotated[
@@ -465,6 +470,12 @@ def plot_surface_command(
     from estk.surface import Surface
 
     use_agg()
+    level_list = None
+    if levels is not None:
+        try:
+            level_list = [float(v) for v in levels.split(",") if v.strip()]
+        except ValueError:
+            raise EstError(f"--levels: expected numbers like 0,0.1,0.2, got {levels!r}") from None
     labels = labels_from_config(load_config(_state["config"]))
     mep_path = MinimumEnergyPath.load(path) if path else None
     surfaces = {f.stem: Surface.load(f) for f in files}
@@ -473,13 +484,13 @@ def plot_surface_command(
         if len(surfaces) == 1:
             ax = plot_surface(
                 next(iter(surfaces.values())), path=mep_path, units=units, vmax=vmax,
-                contour_step=step, contour_labels=contour_labels, labels=labels,
+                contour_step=step, levels=level_list, contour_labels=contour_labels, labels=labels,
             )  # fmt: skip
             fig = ax.figure
         else:
             fig = plot_surfaces(
                 surfaces, ncols=ncols, path=mep_path, units=units, vmax=vmax, contour_step=step,
-                contour_labels=contour_labels, labels=labels,
+                levels=level_list, contour_labels=contour_labels, labels=labels,
             )  # fmt: skip
         for target in targets:
             fig.savefig(target)

@@ -738,7 +738,8 @@ Notes on what was built:
   text in PDFs (fonttype 42), tight saving and frameless legends. Any `.mplstyle` file can be
   given instead.
 - **Free-energy maps:** one-hue blue scale for the depth of the basins (lowest F darkest), in
-  discrete bands between black contour lines (`--step 0` for a smooth scale without lines),
+  discrete bands between black contour lines: about 8 at round values by default, every
+  `--step` (e.g. 0.1), or at explicit `--levels 0,0.05,0.1,0.2` (`--step 0`: smooth, no lines),
   with the values written on every other line (`--contour-labels all|some|none`; black text
   with a thin white outline, readable on dark bands and over a path),
   white above the colour range and where there is no data; contour lines at a round spacing

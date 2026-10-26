@@ -35,6 +35,7 @@ def plot_surface(
     vmin: float | None = None,
     vmax: float | None = None,
     contour_step: float | None = None,
+    levels: Sequence[float] | None = None,
     contour_labels: str = "some",
     labels: Mapping[str, str] | None = None,
     colorbar: bool = True,
@@ -45,7 +46,8 @@ def plot_surface(
     2D: filled map (free energy: light = low, dark = high; above ``vmax`` in the darkest colour;
     no data left blank) in discrete colour bands between black contour lines every
     ``contour_step`` (default: a round step giving about 8 lines; 0 for a smooth scale without
-    lines) and, if given, a ``MinimumEnergyPath`` on top. 1D: the profile, with the error
+    lines), or at the given ``levels`` (which then also set the colour range), and, if given, a
+    ``MinimumEnergyPath`` on top. 1D: the profile, with the error
     band if the surface has one.
 
     ``contour_labels``: write the value on ``"all"`` contour lines, on every other one
@@ -72,8 +74,15 @@ def plot_surface(
     if surface.grid.ndim == 1:
         _plot_profile_1d(ax, surface, values, error, labels, value_label)
     elif surface.grid.ndim == 2:
-        lo, hi = _color_range(surface, values, finite, vmin, vmax, kbt, factor)
-        _plot_map_2d(ax, surface, values, lo, hi, contour_step, contour_labels, labels)
+        if levels is not None:
+            levels = sorted(float(v) for v in levels)
+            if len(levels) < 2:
+                raise EstError("give at least two contour levels")
+            lo, hi = levels[0], levels[-1]
+        else:
+            lo, hi = _color_range(surface, values, finite, vmin, vmax, kbt, factor)
+        spacing = levels if levels is not None else contour_step
+        _plot_map_2d(ax, surface, values, lo, hi, spacing, contour_labels, labels)
         if colorbar:
             _colorbar(ax.figure, ax.collections[0], ax, value_label)
         if path is not None:
@@ -93,6 +102,7 @@ def plot_surfaces(
     units: str | None = None,
     vmax: float | None = None,
     contour_step: float | None = None,
+    levels: Sequence[float] | None = None,
     contour_labels: str = "some",
     labels: Mapping[str, str] | None = None,
 ) -> Figure:
@@ -122,7 +132,8 @@ def plot_surfaces(
         ax = axes[k // ncols][k % ncols]
         plot_surface(
             surface, ax, path=path, units=units, vmax=vmax, contour_step=contour_step,
-            contour_labels=contour_labels, labels=labels, colorbar=False, title=name,
+            levels=levels, contour_labels=contour_labels, labels=labels, colorbar=False,
+            title=name,
         )  # fmt: skip
         if k % ncols:
             ax.set_ylabel("")
@@ -206,7 +217,7 @@ def _plot_map_2d(
     values: np.ndarray,
     lo: float,
     hi: float,
-    contour_step: float | None,
+    contour_step: float | Sequence[float] | None,
     contour_labels: str,
     labels: Mapping[str, str] | None,
 ) -> None:
@@ -214,7 +225,9 @@ def _plot_map_2d(
     masked = np.ma.masked_invalid(values)
     cmap = FREE_ENERGY_CMAP if surface.is_fes else PROPERTY_CMAP
     # One colour band between consecutive contour lines.
-    if contour_step is None:
+    if contour_step is not None and not np.isscalar(contour_step):
+        lines = np.asarray(contour_step, dtype=float)
+    elif contour_step is None:
         lines = MaxNLocator(8).tick_values(lo, hi)
         lines = lines[(lines >= lo - 1e-12) & (lines <= hi + 1e-12)]
     elif contour_step > 0:

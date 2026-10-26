@@ -163,3 +163,18 @@ def test_contour_labels(surface):
     assert len(plot_surface(surface, vmax=10.0, contour_step=2.0, contour_labels="none").texts) == 0
     with pytest.raises(EstError, match="contour labels"):
         plot_surface(surface, contour_labels="few")
+
+
+def test_explicit_levels(surface, workdir):
+    ax = plot_surface(surface, levels=[0, 2, 5, 10, 20], units="kJ/mol")
+    np.testing.assert_allclose(ax.collections[0].levels, [0, 2, 5, 10, 20])
+    np.testing.assert_allclose(ax.collections[1].levels, [0, 2, 5, 10, 20])
+    with pytest.raises(EstError, match="two contour levels"):
+        plot_surface(surface, levels=[1.0])
+    surface.save(workdir / "s.dat")
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["plot", "surface", "s.dat", "--levels", "0,0.05,0.1,0.2", "--units", "eV"]
+    )
+    assert result.exit_code == 0, result.output
+    assert runner.invoke(app, ["plot", "surface", "s.dat", "--levels", "0,a"]).exit_code == 1
