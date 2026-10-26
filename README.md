@@ -5,7 +5,8 @@ free-energy surfaces, minimum-energy paths, barrier convergence and structure ex
 
 The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
 for the plan and the status of each part. At this stage the configuration, reading the simulation
-settings, loading CV data, reweighting, combining runs and minimum energy paths are in place.
+settings, loading CV data, reweighting, combining runs, minimum energy paths and figures are in
+place.
 
 ## Install
 
@@ -29,7 +30,14 @@ estk reweight d0 cn -j 4     # per-run surfaces + all runs combined -> reweight-
 estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
+estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat --units eV
+estk plot surface reweight-d0-cn/*.dat --units eV       # all runs side by side
+estk plot path reweight-d0-cn/combined.mep.dat --units eV -o profile.pdf
 ```
+
+Axis labels come from `estk.yaml` (`cv.d0.label: "d(Ti–O)"`, `cv.d0.units: Å`). Figures use the
+`paper` style (single-column journal figures); `--style slides` or your own `.mplstyle` file
+change it.
 
 From Python:
 
@@ -46,6 +54,10 @@ both = result.combined                 # all runs; .error = spread between runs
 
 from estk.paths import minimum_energy_path
 path = minimum_energy_path(both)       # .points, .energies, .barrier, .reverse_barrier
+
+from estk.plotting import plot_style, plot_surface, plot_path_profile
+with plot_style("paper"):
+    ax = plot_surface(both, path=path, units="eV")   # returns the matplotlib Axes
 ```
 
 Coming from the old Hydra configuration:

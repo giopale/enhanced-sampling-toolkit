@@ -142,7 +142,7 @@ estk mep d0-cn.fes.h5 --minima 2 --split vertical # -> d0-cn.mep.h5 + plot
 | 9 | [Surface file format](#9-surface-file-format) | in progress |
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
 | 11 | [Barrier convergence](#11-barrier-convergence) | todo |
-| 12 | [Surface plotting](#12-surface-plotting) | todo |
+| 12 | [Surface plotting](#12-surface-plotting) | done |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | todo |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
 | 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | todo |
@@ -725,7 +725,31 @@ Notes on what was built:
 
 ## 12. Surface plotting
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/plotting/` (`plot_surface`, `plot_surfaces`, `draw_path`,
+`plot_path_profile`, `plot_style`, bundled `paper` and `slides` styles) and
+`estk plot surface FILE... [--path P] [--units eV|kT|...] [--vmax] [--step] [--ncols]
+[--style] [-o OUT]...` and `estk plot path FILE.mep.dat [--units] [--runs/--no-runs]
+[--annotate/--no-annotate] [--style] [-o OUT]...`. Tested in `tests/test_plotting.py`.
+
+Notes on what was built:
+- `paper` style: the original JCP style (3.37 in, 6-7 pt text, inward ticks) with editable
+  text in PDFs (fonttype 42), tight saving and frameless legends. Any `.mplstyle` file can be
+  given instead.
+- **Free-energy maps:** one-hue blue scale for the depth of the basins (lowest F darkest),
+  white above the colour range and where there is no data; contour lines at a round spacing
+  (about 8 by default); colour bar ticks at round values inside the range. Default range 20 kT.
+  Property maps use a second one-hue scale (orange).
+- **Paths on maps:** orange line, start open circle, end filled circle, highest point ×.
+- **Small multiples** (several files): one shared colour scale, titles = run names.
+- **Profiles along a path:** the combined profile in black with the spread between runs as a
+  grey band, each run in a fixed categorical colour (colour-vision-safe order) with a legend
+  above the plot and direct labels at the line ends (spread apart so they don't overlap);
+  forward and reverse barriers and the reaction free energy written in the corner.
+- Energies can be shown in kJ/mol, kcal/mol, eV or kT; axis labels come from
+  `cv.<name>.label` / `units` in estk.yaml.
+- matplotlib becomes a dependency.
 
 ### Current state
 - `commands/plot_surface_data.py` (≈400 lines) draws multi-panel contour plots of the FES or of

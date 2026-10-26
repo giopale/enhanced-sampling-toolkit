@@ -31,6 +31,8 @@ app = typer.Typer(
 )
 config_app = typer.Typer(help="Inspect, check and migrate estk.yaml.", no_args_is_help=True)
 app.add_typer(config_app, name="config")
+plot_app = typer.Typer(help="Figures of surfaces and paths.", no_args_is_help=True)
+app.add_typer(plot_app, name="plot")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -417,6 +419,102 @@ def mep(
         if len(values) > 1:
             console.print(f"  spread between runs: {np.std(values):.2f} {surface.units}")
     console.print(f"wrote {target}")
+
+
+UnitsOption = Annotated[
+    str | None, typer.Option(help="Energy units shown: kJ/mol, kcal/mol, eV or kT.")
+]
+StyleOption = Annotated[
+    str, typer.Option(help="Plot style: paper (default), slides, or a .mplstyle file.")
+]
+OutputsOption = Annotated[
+    list[Path] | None,
+    typer.Option("--output", "-o", help="Output file(s); the extension sets the format (repeat)."),
+]
+
+
+@plot_app.command("surface")
+@handle_errors
+def plot_surface_command(
+    files: Annotated[
+        list[Path], typer.Argument(help="Surface file(s); several = small multiples.")
+    ],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Path file (.mep.dat) to draw on top.")
+    ] = None,
+    units: UnitsOption = None,
+    vmax: Annotated[
+        float | None, typer.Option(help="Top of the colour scale (default 20 kT).")
+    ] = None,
+    step: Annotated[
+        float | None, typer.Option(help="Spacing of the contour lines (0: none).")
+    ] = None,
+    ncols: Annotated[int, typer.Option(help="Columns of small multiples.")] = 3,
+    style: StyleOption = "paper",
+    output: OutputsOption = None,
+) -> None:
+    """Free-energy map (or property map / 1D profile), optionally with a path on top."""
+    import matplotlib.pyplot as plt
+
+    from estk.paths import MinimumEnergyPath
+    from estk.plotting import labels_from_config, plot_style, plot_surface, plot_surfaces
+    from estk.plotting.core import use_agg
+    from estk.surface import Surface
+
+    use_agg()
+    labels = labels_from_config(load_config(_state["config"]))
+    mep_path = MinimumEnergyPath.load(path) if path else None
+    surfaces = {f.stem: Surface.load(f) for f in files}
+    targets = output or [files[0].with_suffix(".png")]
+    with plot_style(style):
+        if len(surfaces) == 1:
+            ax = plot_surface(
+                next(iter(surfaces.values())), path=mep_path, units=units, vmax=vmax,
+                contour_step=step, labels=labels,
+            )  # fmt: skip
+            fig = ax.figure
+        else:
+            fig = plot_surfaces(
+                surfaces, ncols=ncols, path=mep_path, units=units, vmax=vmax, contour_step=step,
+                labels=labels,
+            )  # fmt: skip
+        for target in targets:
+            fig.savefig(target)
+        plt.close(fig)
+    console.print(f"wrote {', '.join(str(t) for t in targets)}")
+
+
+@plot_app.command("path")
+@handle_errors
+def plot_path_command(
+    file: Annotated[Path, typer.Argument(help="Path file written by estk mep (.mep.dat).")],
+    units: UnitsOption = None,
+    runs: Annotated[
+        bool, typer.Option("--runs/--no-runs", help="Draw each run's profile too.")
+    ] = True,
+    annotate: Annotated[
+        bool, typer.Option("--annotate/--no-annotate", help="Write the barriers in the plot.")
+    ] = True,
+    style: StyleOption = "paper",
+    output: OutputsOption = None,
+) -> None:
+    """Free energy along a minimum energy path, with each run's profile and the barriers."""
+    import matplotlib.pyplot as plt
+
+    from estk.paths import MinimumEnergyPath
+    from estk.plotting import plot_path_profile, plot_style
+    from estk.plotting.core import use_agg
+
+    use_agg()
+    mep_path = MinimumEnergyPath.load(file)
+    name = file.name.removesuffix(".dat")
+    targets = output or [file.with_name(name + ".png")]
+    with plot_style(style):
+        ax = plot_path_profile(mep_path, units=units, runs=runs, annotate=annotate)
+        for target in targets:
+            ax.figure.savefig(target)
+        plt.close(ax.figure)
+    console.print(f"wrote {', '.join(str(t) for t in targets)}")
 
 
 def _parse_point(text: str | None, option: str, ndim: int) -> list[float] | None:

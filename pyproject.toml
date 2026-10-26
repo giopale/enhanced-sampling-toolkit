@@ -9,6 +9,7 @@ description = "Analysis tools for MD + enhanced sampling (PLUMED/OPES) simulatio
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "matplotlib",
     "numpy",
     "pydantic>=2",
     "rich",
@@ -25,6 +26,9 @@ estk = "estk.cli.main:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+estk = ["plotting/styles/*.mplstyle"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,54 @@
+# estk "paper" style: single-column figures for J. Chem. Phys. and similar journals
+# (3.37 in wide). Based on the style of the original scripts.
+
+figure.figsize: 3.37, 1.89
+figure.dpi: 150
+savefig.dpi: 600
+savefig.bbox: tight
+savefig.pad_inches: 0.02
+pdf.fonttype: 42          # editable text in PDF/EPS
+ps.fonttype: 42
+
+font.size: 6
+axes.titlesize: 7
+axes.labelsize: 7
+axes.linewidth: 0.6
+axes.edgecolor: 0b0b0b
+axes.labelcolor: 0b0b0b
+axes.titleweight: normal
+axes.labelpad: 2
+
+patch.linewidth: 0.6
+lines.linewidth: 0.8
+lines.markeredgewidth: 0.6
+lines.markersize: 3.0
+
+xtick.direction: in
+xtick.top: True
+xtick.minor.visible: True
+xtick.major.size: 3.5
+xtick.minor.size: 1.75
+xtick.major.width: 0.6
+xtick.minor.width: 0.5
+xtick.major.pad: 2
+xtick.labelsize: 6
+xtick.color: 0b0b0b
+
+ytick.direction: in
+ytick.right: True
+ytick.minor.visible: True
+ytick.major.size: 3.5
+ytick.minor.size: 1.75
+ytick.major.width: 0.6
+ytick.minor.width: 0.5
+ytick.major.pad: 2
+ytick.labelsize: 6
+ytick.color: 0b0b0b
+
+legend.frameon: False
+legend.fontsize: 6
+legend.handlelength: 1.5
+legend.borderaxespad: 0.3
+
+grid.linewidth: 0.4
+grid.color: e1e0d9
