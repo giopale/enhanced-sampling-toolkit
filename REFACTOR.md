@@ -294,6 +294,23 @@ Notes on what was built:
   (warning). If the log has no temperature, the bias's `TEMP=` is used.
 - Runs are folders matching the pattern **that contain a COLVAR file** (others are skipped and
   listed), in natural order (`run-2` before `run-10`). The folder name identifies the run.
+- **Multiple walkers** (LAMMPS partitions): a folder with `COLVAR.<i>`, `log.lammps.<i>`,
+  `model_devi.<i>.out`, ... holds the walkers of one simulation. A walker's file is
+  `name.<i>` (LAMMPS) or `stem.<i>.ext` (PLUMED); `plumed.plumed` and the state file are
+  shared. With `WALKERS_MPI` on the bias the walkers share it, so the folder is **one run**
+  whose frames are those of all walkers pooled. That is exact: every frame is weighted with
+  the same bias, so the pooled surface equals the `probability` combination of the walkers
+  (tested to 1e-9). Without `WALKERS_MPI` each walker is a run (`<folder>.w<i>`);
+  `runs.walkers: pool|separate` overrides. Settings come from the first walker's log (the
+  plain `log.lammps` of a partitioned run only has the partition summary). `CVTable.walker`
+  and `TimeSeries.walker` give each row's walker; `estk runs` shows the walkers, `estk check
+  model-deviation` has a row per walker, and the diagnostic plots draw each walker in its
+  run's colour.
+- **Blocks** (`estk reweight --blocks N`): walkers that share a bias are not independent, so
+  their spread is no error bar. Each run is cut into N equal spans of time (`<run>.b<k>`, all
+  walkers together); the blocks are reweighted and combined like runs, so their spread
+  (`fes.err`, the barrier on each block in `estk mep`) estimates the error, and their
+  `probability` combination is the whole run's surface.
 - k_B T uses CODATA R = 8.314462618e-3 kJ/(mol K) (the old code used 8.3144621e-3; the relative
   difference is 1e-8) and is given in the energy units of the bias.
 
@@ -423,6 +440,13 @@ Notes on what was built:
   frames on 100x100). Grid points so far from all frames that the factorised sums underflow are
   recomputed with the direct log-space sums, so the results match there too. Other cases (full
   bandwidth matrix, 1 or 3+ CVs) use the direct sums.
+- **Many frames** (above 200 000, e.g. 16 walkers): the frames are first binned on a grid an
+  eighth of a bandwidth fine (linear binning) and the sums run over the occupied bins. On 2
+  million frames with bandwidths like those of the reference system (0.026, 0.019) a whole
+  `estk reweight` takes 10 s instead of about 30 s. The error is second order in the bin
+  width: 0.002 kT where F < 5 kT, 0.009 kT where F < 10 kT, 0.04 kT where F < 20 kT (sparse
+  tails of a 2D Gaussian). Surfaces say which was used (`kde: binned|exact`);
+  `kde_on_grid(..., binned=False)` forces the direct sums.
 - **Output values.** Free energies are shifted so the minimum is 0; the removed constant is
   `fes_offset` in the file header (values + offset = -kT log p with weights normalised to 1, as
   in the old per-run files). `log_weight_total` is now log Σ exp(V/kT) **without** subtracting the

@@ -24,15 +24,35 @@ OPES_COMPONENTS = ("rct", "zed", "neff", "nker")
 
 @dataclass
 class TimeSeries:
-    """Columns of one file of one run against time (ns), restarts removed."""
+    """Columns of one file of one run against time (ns), restarts removed.
+
+    For a run of several walkers the walkers' rows follow each other and ``walker`` gives each
+    row's walker; ``segments()`` splits them.
+    """
 
     run: str
     time: np.ndarray  # ns
     values: dict[str, np.ndarray]
     source: Path
+    walker: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.time)
+
+    def segments(self) -> list[tuple[int | None, np.ndarray]]:
+        """``(walker, rows)`` for each walker, in time order; ``[(None, all rows)]`` without."""
+        if self.walker is None:
+            return [(None, np.arange(len(self.time)))]
+        return [(int(w), np.flatnonzero(self.walker == w)) for w in np.unique(self.walker)]
+
+    def select(self, rows: np.ndarray) -> TimeSeries:
+        return TimeSeries(
+            run=self.run,
+            time=self.time[rows],
+            values={name: v[rows] for name, v in self.values.items()},
+            source=self.source,
+            walker=self.walker[rows] if self.walker is not None else None,
+        )
 
 
 def read_timeseries(
@@ -41,25 +61,34 @@ def read_timeseries(
     """Read ``columns`` (default: all but the first) of ``file`` (default: COLVAR) in ``run``.
 
     Files indexed by ``step`` (e.g. model_devi.out) are converted to time with the run's
-    timestep. Repeated times (restarts) keep the last occurrence.
+    timestep. Repeated times (restarts) keep the last occurrence. A run of several walkers
+    reads each walker's file (``COLVAR.<i>``, ``model_devi.<i>.out``).
     """
-    path = run.colvar_path if file is None else run.path / file
-    table = read_table(path)
-    names = list(columns) if columns is not None else table.fields[1:]
-    missing = [c for c in names if not table.has(c)]
-    if missing:
-        raise EstError(
-            f"{path}: no column(s) {', '.join(missing)} (columns: {', '.join(table.fields)})"
-        )
-    time_ps = _file_time_ps(table, run)
-    _, rows, duplicates = _keys(time_ps)
-    if duplicates:
-        log.debug("%s: %d repeated times removed", path, duplicates)
+    name = file if file is not None else run.config.files.colvar
+    parts = []
+    for walker in run.walker_ids:
+        path = run.file(name, walker)
+        table = read_table(path)
+        names = list(columns) if columns is not None else table.fields[1:]
+        missing = [c for c in names if not table.has(c)]
+        if missing:
+            raise EstError(f"{path}: no column(s) {', '.join(missing)} "
+                           f"(columns: {', '.join(table.fields)})")  # fmt: skip
+        time_ps = _file_time_ps(table, run)
+        _, rows, duplicates = _keys(time_ps)
+        if duplicates:
+            log.debug("%s: %d repeated times removed", path, duplicates)
+        parts.append((walker, path, time_ps[rows] / 1000.0,
+                      {c: table.column(c)[rows] for c in names}))  # fmt: skip
+    if len(parts) == 1:
+        _, path, time, values = parts[0]
+        return TimeSeries(run=run.name, time=time, values=values, source=path)
     return TimeSeries(
         run=run.name,
-        time=time_ps[rows] / 1000.0,
-        values={c: table.column(c)[rows] for c in names},
-        source=path,
+        time=np.concatenate([p[2] for p in parts]),
+        values={c: np.concatenate([p[3][c] for p in parts]) for c in parts[0][3]},
+        source=parts[0][1],
+        walker=np.concatenate([np.full(len(p[2]), p[0]) for p in parts]),
     )
 
 
@@ -90,8 +119,10 @@ class OpesSummary:
 def opes_summary(series: TimeSeries) -> OpesSummary:
     """Final values, and how much ``rct`` (c(t)) still changed over the last quarter of the run.
 
-    A converged OPES run has an almost constant c(t).
+    A converged OPES run has an almost constant c(t). For walkers the first walker is used:
+    with a shared bias, rct, zed, neff and nker are the same for all of them.
     """
+    series = series.select(series.segments()[0][1])
     final = {name: float(values[-1]) for name, values in series.values.items()}
     rct = next((v for k, v in series.values.items() if k.endswith(".rct")), None)
     change = None

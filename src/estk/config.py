@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import (
@@ -57,10 +57,17 @@ class _Section(BaseModel):
 
 
 class RunsConfig(_Section):
-    """Where the simulation runs are: one folder per run, matched by ``pattern`` in ``root``."""
+    """Where the simulation runs are: one folder per run, matched by ``pattern`` in ``root``.
+
+    A folder can hold several walkers (``COLVAR.0``, ``COLVAR.1``, ... from LAMMPS partitions).
+    ``walkers`` says what they are: ``pool`` (one run: the walkers share one bias, as with
+    ``WALKERS_MPI``), ``separate`` (each walker is a run of its own, ``<folder>.w<i>``), or
+    ``auto``: pool if the PLUMED input has ``WALKERS_MPI``, separate otherwise.
+    """
 
     root: Path = Path(".")
     pattern: str = "*"
+    walkers: Literal["auto", "pool", "separate"] = "auto"
 
 
 class FilesConfig(_Section):
@@ -397,6 +404,9 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         f"  root: {_yaml.scalar(root)}",
         "  # Glob pattern matching one folder per simulation run.",
         f"  pattern: {_yaml.scalar(pattern)}",
+        "  # Several walkers in a folder (COLVAR.0, COLVAR.1, ...): pool them into one run",
+        "  # (shared bias, WALKERS_MPI), keep them separate, or auto (pool with WALKERS_MPI).",
+        "  walkers: auto",
         "",
         "files:",
         "  # File names inside each run folder.",

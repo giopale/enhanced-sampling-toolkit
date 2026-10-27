@@ -151,7 +151,11 @@ class LoadReport:
 
 @dataclass
 class CVTable:
-    """Time-aligned data of one run: time (ps), the bias, and one array per CV/quantity."""
+    """Time-aligned data of one run: time (ps), the bias, and one array per CV/quantity.
+
+    For a run of several walkers the rows of all walkers follow each other, and ``walker``
+    gives each row's walker (time then restarts at each walker's beginning).
+    """
 
     run_name: str
     time: np.ndarray
@@ -160,6 +164,7 @@ class CVTable:
     kbt: float | None = None  # in the energy units of the bias
     energy_units: str = "kj/mol"
     report: LoadReport = field(default_factory=LoadReport)
+    walker: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.time)
@@ -178,6 +183,19 @@ class CVTable:
         """Stack the given columns (default: all) into an array of shape (rows, len(names))."""
         names = list(names) if names is not None else self.names
         return np.column_stack([self[n] for n in names]) if names else np.empty((len(self), 0))
+
+    def select(self, rows: np.ndarray, run_name: str | None = None) -> CVTable:
+        """The table restricted to ``rows`` (a boolean mask or indices)."""
+        return CVTable(
+            run_name=run_name or self.run_name,
+            time=self.time[rows],
+            columns={name: values[rows] for name, values in self.columns.items()},
+            bias=self.bias[rows] if self.bias is not None else None,
+            kbt=self.kbt,
+            energy_units=self.energy_units,
+            report=self.report,
+            walker=self.walker[rows] if self.walker is not None else None,
+        )
 
 
 def load_cv_table(
@@ -216,13 +234,73 @@ def load_cv_table(
         loaded for this purpose if needed.
 
     The frames past each wall of a loaded CV are counted in ``report.walls`` in any case.
+
+    A run of several walkers reads every walker's files (``COLVAR.<i>``, ``CV-<name>.<i>``,
+    ``model_devi.<i>.out``, ...) and pools the rows; ``walker`` then gives each row's walker.
     """
+    options = dict(time=time, extra=extra, filters=filters, bias=bias,
+                   include_walls=include_walls)  # fmt: skip
+    parts = [_load_walker(run, walker, cvs, **options) for walker in run.walker_ids]
+    if len(parts) == 1:
+        table = parts[0]
+    else:
+        table = CVTable(
+            run_name=run.name,
+            time=np.concatenate([p.time for p in parts]),
+            columns={n: np.concatenate([p.columns[n] for p in parts]) for n in parts[0].columns},
+            bias=np.concatenate([p.bias for p in parts]) if parts[0].bias is not None else None,
+            kbt=parts[0].kbt,
+            energy_units=parts[0].energy_units,
+            report=_merge_reports([p.report for p in parts]),
+            walker=np.concatenate(
+                [np.full(len(p), w) for p, w in zip(parts, run.walker_ids, strict=True)]
+            ),
+        )
+    if len(table) == 0:
+        raise EstError(f"{run.name}: no rows left after selection ({table.report.summary()})")
+    log.debug("%s: %s", run.name, table.report.summary())
+    return table
+
+
+def _merge_reports(reports: list[LoadReport]) -> LoadReport:
+    """One report for the pooled walkers: counts added up, the largest wall energy kept."""
+    merged = LoadReport(sources=reports[0].sources)
+    for r in reports:
+        merged.rows_colvar += r.rows_colvar
+        merged.duplicates += r.duplicates
+        merged.outside_time += r.outside_time
+        merged.filtered += r.filtered
+        merged.rows += r.rows
+        merged.walls_in_bias |= r.walls_in_bias
+        for name, n in r.missing.items():
+            merged.missing[name] = merged.missing.get(name, 0) + n
+        for name, n in r.nan.items():
+            merged.nan[name] = merged.nan.get(name, 0) + n
+        for name, (n, energy) in r.walls.items():
+            n0, e0 = merged.walls.get(name, (0, None))
+            highest = max((e for e in (e0, energy) if e is not None), default=None)
+            merged.walls[name] = (n0 + n, highest)
+    return merged
+
+
+def _load_walker(
+    run: Run,
+    walker: int | None,
+    cvs: Sequence[str],
+    *,
+    time: tuple[float | None, float | None] | None,
+    extra: Mapping[str, str | Path] | None,
+    filters: Mapping[str, tuple[float | None, float | None]] | None,
+    bias: bool,
+    include_walls: bool,
+) -> CVTable:
+    """``load_cv_table`` for one walker's files (or the run's, ``walker=None``); may be empty."""
     meta = run.metadata
     config = run.config
     report = LoadReport()
     time_factor = meta.time_factor
 
-    colvar = read_table(run.colvar_path)
+    colvar = read_table(run.file(config.files.colvar, walker))
     if not colvar.fields or colvar.fields[0].lower() != "time":
         raise EstError(f"{colvar.path}: first column must be 'time'")
     report.rows_colvar = len(colvar.data)
@@ -237,20 +315,20 @@ def load_cv_table(
     # Which file each requested column comes from.
     wanted: dict[str, Path | None] = {}
     for name in cvs:
-        wanted[name] = None if colvar.has(name) else run.path / _cv_source(name, config)
+        wanted[name] = None if colvar.has(name) else run.file(_cv_source(name, config), walker)
     for name, path in (extra or {}).items():
-        wanted[name] = run.path / Path(path)
+        wanted[name] = run.file(path, walker)
     hidden = set()  # columns loaded only for filters or walls
     for name in filters or {}:
         if name not in wanted:
-            wanted[name] = None if colvar.has(name) else run.path / _cv_source(name, config)
+            wanted[name] = None if colvar.has(name) else run.file(_cv_source(name, config), walker)
             hidden.add(name)
     walls = meta.wall_terms
     if include_walls and bias:
         for wall in walls:
             if wall.cv not in wanted:
                 wanted[wall.cv] = (
-                    None if colvar.has(wall.cv) else run.path / _cv_source(wall.cv, config)
+                    None if colvar.has(wall.cv) else run.file(_cv_source(wall.cv, config), walker)
                 )
                 hidden.add(wall.cv)
 
@@ -366,10 +444,7 @@ def load_cv_table(
         if name not in cvs and name not in (extra or {}):
             columns.pop(name)
     report.rows = int(np.count_nonzero(keep))
-    if report.rows == 0:
-        raise EstError(f"{run.name}: no rows left after selection ({report.summary()})")
-
-    table = CVTable(
+    return CVTable(
         run_name=run.name,
         time=time_ps[keep],
         columns={name: values[keep] for name, values in columns.items()},
@@ -378,8 +453,6 @@ def load_cv_table(
         energy_units=meta.energy_units,
         report=report,
     )
-    log.debug("%s: %s", run.name, report.summary())
-    return table
 
 
 def _keys(time_ps: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:

@@ -55,6 +55,25 @@ The temperature, timestep, bias factor, PLUMED walls and units are read from the
 you don't type them anywhere. Restarted runs are fine: when a time appears twice in a file, the
 last occurrence is kept.
 
+**Multiple walkers.** A folder can also hold the walkers of one simulation, as LAMMPS
+partitions (`-partition 16x...`) leave them:
+
+```
+A.mpi/
+└── 000/
+    ├── plumed.plumed     one input, OPES with WALKERS_MPI
+    ├── State.data        one state file: the bias is shared
+    ├── COLVAR.0 ... COLVAR.15
+    ├── log.lammps.0 ... log.lammps.15
+    └── model_devi.0.out ... model_devi.15.out
+```
+
+Each walker's files are found by its number, both `name.<i>` and `name.<i>.ext`. With
+`WALKERS_MPI` the walkers share one bias, so their frames are pooled into one run: `000` gives
+one surface, and every command below works on it as on a single run. Without `WALKERS_MPI`,
+each walker is a run of its own (`000.w0`, `000.w1`, ...). `runs.walkers: pool` or `separate`
+in `estk.yaml` sets this by hand. `estk runs` shows what was found.
+
 ## 3. Set up the project
 
 In `my-system/`:
@@ -187,6 +206,7 @@ This writes one surface per run, `reweight-d0-cn/000.dat` ..., and all runs comb
 | `--include-walls` | add the PLUMED wall energies to the bias |
 | `--combine equal` | each run counts the same (default `probability`: as if all frames were one run; `legacy`: as the old scripts) |
 | `--property max_devi_f --source model_devi.out` | average of a quantity instead of the free energy |
+| `--blocks 4` | split each run into 4 time blocks (`000.b1`, ...): their spread is an error bar for one simulation |
 | `--compress` | write `.dat.gz` files |
 | `-o folder` | output folder |
 
@@ -370,6 +390,20 @@ among all the minima.
 **Few effective frames.** `n_eff` in the `reweight` table is the number of frames that
 effectively count after reweighting. When it is small (tens), surfaces and barriers are noisy;
 the spread between runs and `estk convergence time` show how much.
+
+**Error bars for one simulation of walkers.** Walkers that share a bias are not independent,
+so the spread between them is no error bar. Use time blocks instead:
+
+```bash
+estk reweight d0 cn --blocks 4
+estk mep reweight-d0-cn/combined.dat     # barrier on each block, and their spread
+```
+
+The `probability` combination of the blocks is the surface of the whole simulation. The spread
+between blocks is about √4 times the standard error of that surface. Drop the start-up period
+first (`--time <start> inf`, see `estk check opes`), so the blocks don't include it. Two
+independent multi-walker simulations (`000/`, `001/`) give an error bar that doesn't depend on
+the bias having settled.
 
 **Choosing bandwidths.** Results should not depend much on them. Check with
 `estk convergence bandwidth`. `--bandwidth scv` fits them to the data by smoothed

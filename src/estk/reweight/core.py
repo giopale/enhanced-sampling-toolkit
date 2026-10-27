@@ -13,11 +13,11 @@ import numpy as np
 
 from estk.errors import EstError
 from estk.grid import Grid, Limits, resolve_limits
-from estk.io.colvar import CVTable
+from estk.io.colvar import CVTable, LoadReport
 from estk.logging import get_logger
 from estk.reweight.bandwidth import effective_sample_size, scv, silverman
 from estk.reweight.combine import combine as combine_surfaces
-from estk.reweight.kde import kde_on_grid
+from estk.reweight.kde import BINNED_FRAMES, kde_on_grid
 from estk.surface import Surface
 
 if TYPE_CHECKING:
@@ -139,9 +139,10 @@ def reweight_table(
         "log_weight_total": log_total,
         "log_weight_max": float(raw.max()),
         "walls_in_bias": table.report.walls_in_bias,
+        "kde": "binned" if len(table) > BINNED_FRAMES else "exact",
         "time_range_ns": [
-            round(float(table.time[0]) / 1000, 9),
-            round(float(table.time[-1]) / 1000, 9),
+            round(float(table.time.min()) / 1000, 9),
+            round(float(table.time.max()) / 1000, 9),
         ]
         if len(table)
         else None,
@@ -206,6 +207,7 @@ def reweight(
     jobs: int = 1,
     skip_failed: bool = False,
     combine: str | None = "probability",
+    blocks: int = 1,
 ) -> ReweightResult:
     """Reweight every run of ``project`` onto one grid, and combine the runs.
 
@@ -237,7 +239,14 @@ def reweight(
     combine:
         How to combine the runs into ``result.combined`` (see ``estk.reweight.combine``):
         ``"probability"``, ``"equal"``, ``"legacy"``, or None for no combination.
+    blocks:
+        Split each run into this many consecutive time blocks (``<run>.b1``, ...) and reweight
+        each: the spread between them estimates the error of a single simulation, e.g. of
+        walkers that share a bias, whose spread is no error bar. The ``probability``
+        combination of the blocks is the surface of the whole run.
     """
+    if blocks < 1:
+        raise EstError(f"blocks must be at least 1, got {blocks}")
     cvs = list(cvs)
     if not cvs:
         raise EstError("no CVs given")
@@ -288,9 +297,13 @@ def reweight(
     )
     configured = {n: project.config.cv[n].bandwidth for n in cvs if n in project.config.cv}
 
+    parents = {name: name for name in tables}
+    if blocks > 1:
+        tables, parents = _split_blocks(tables, blocks)
+
     jobs_args = {}
     for name, table in tables.items():
-        meta = runs[name].metadata
+        meta = runs[parents[name]].metadata
         jobs_args[name] = dict(
             table=table,
             grid=grid,
@@ -302,6 +315,7 @@ def reweight(
             metadata={
                 "temperature": meta.temperature,
                 "time_window_ns": list(time) if time else None,
+                **({"block_of": parents[name]} if blocks > 1 else {}),
             },
         )
 
@@ -405,3 +419,23 @@ def estimate_bandwidths(
         results.append(estimate("all", np.concatenate(xs), np.concatenate(raws),
                                 factors.pop() if len(factors) == 1 else None))  # fmt: skip
     return results
+
+
+def _split_blocks(
+    tables: dict[str, CVTable], blocks: int
+) -> tuple[dict[str, CVTable], dict[str, str]]:
+    """Each table cut into ``blocks`` equal spans of time (all walkers of a span together)."""
+    split, parents = {}, {}
+    for name, table in tables.items():
+        edges = np.linspace(table.time.min(), table.time.max(), blocks + 1)
+        index = np.clip(np.searchsorted(edges, table.time, side="right") - 1, 0, blocks - 1)
+        for k in range(blocks):
+            rows = index == k
+            if not rows.any():
+                raise EstError(f"{name}: block {k + 1} of {blocks} has no frames; use fewer")
+            block = f"{name}.b{k + 1}"
+            split[block] = table.select(rows, block)
+            # the load report (walls, missing rows) is the whole run's: not repeated per block
+            split[block].report = LoadReport(rows=int(np.count_nonzero(rows)))
+            parents[block] = name
+    return split, parents

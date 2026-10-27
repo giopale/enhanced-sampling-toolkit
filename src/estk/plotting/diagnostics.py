@@ -12,12 +12,23 @@ from estk.errors import EstError
 from estk.plotting.core import INK_MUTED, INK_SECONDARY, SERIES
 
 MAX_POINTS = 4000  # per line; longer series are thinned for drawing (not for the statistics)
+MEDIAN_BINS = 100  # time bins of the median line of the model deviation
 SKIP = 0.05  # start of each run left out of the y range of linear panels when it is a transient
 
 
-def _thin(time: np.ndarray, values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    step = max(1, math.ceil(len(time) / MAX_POINTS))
+def _thin(time: np.ndarray, values: np.ndarray, parts: int = 1) -> tuple[np.ndarray, np.ndarray]:
+    """Every n-th point, so that ``parts`` lines of this length have MAX_POINTS in all."""
+    step = max(1, math.ceil(len(time) * parts / MAX_POINTS))
     return time[::step], values[::step]
+
+
+def _pieces(ts: object, column: str) -> list[tuple[np.ndarray, np.ndarray]]:
+    """``(time, values)`` of each walker of a ``TimeSeries`` (one piece without walkers)."""
+    segments = ts.segments()  # type: ignore[attr-defined]
+    return [
+        _thin(ts.time[rows], ts.values[column][rows], len(segments))  # type: ignore[attr-defined]
+        for _, rows in segments
+    ]
 
 
 def _bulk_limits(series: Sequence[object], column: str) -> tuple[float, float] | None:
@@ -30,7 +41,7 @@ def _bulk_limits(series: Sequence[object], column: str) -> tuple[float, float] |
             continue
         t = ts.time  # type: ignore[attr-defined]
         full.append(values)
-        bulk.append(values[t >= t[0] + SKIP * (t[-1] - t[0])])
+        bulk.append(values[t >= t.min() + SKIP * (t.max() - t.min())])
     if not bulk:
         return None
     full_values, bulk_values = np.concatenate(full), np.concatenate(bulk)
@@ -41,11 +52,16 @@ def _bulk_limits(series: Sequence[object], column: str) -> tuple[float, float] |
     return float(lo - pad), float(hi + pad)
 
 
-def _running_median(values: np.ndarray, fraction: float = 0.02) -> np.ndarray:
-    from scipy.ndimage import median_filter
-
-    size = max(3, int(fraction * len(values)) | 1)
-    return median_filter(values, size=size, mode="reflect")
+def _binned_median(
+    time: np.ndarray, values: np.ndarray, bins: int = MEDIAN_BINS
+) -> tuple[np.ndarray, np.ndarray]:
+    """Median of ``values`` in equal bins of time (all walkers together)."""
+    edges = np.linspace(time.min(), time.max(), bins + 1)
+    index = np.clip(np.searchsorted(edges, time, side="right") - 1, 0, bins - 1)
+    centres = (edges[:-1] + edges[1:]) / 2
+    medians = np.array([np.median(values[index == b]) if np.any(index == b) else np.nan
+                        for b in range(bins)])  # fmt: skip
+    return centres, medians
 
 
 def _color(k: int) -> str:
@@ -78,8 +94,8 @@ def plot_timeseries(
         for k, (name, ts) in enumerate(series.items()):
             if column not in ts.values:  # type: ignore[attr-defined]
                 continue
-            t, v = _thin(ts.time, ts.values[column])  # type: ignore[attr-defined]
-            ax.plot(t, v, color=_color(k), lw=0.5, label=name)
+            for i, (t, v) in enumerate(_pieces(ts, column)):  # one line per walker
+                ax.plot(t, v, color=_color(k), lw=0.5, label=name if i == 0 else "_nolegend_")
         ax.set_ylabel((labels or {}).get(column, column))
         if column in log_columns:
             ax.set_yscale("log")
@@ -121,10 +137,12 @@ def plot_model_deviation(
     edges = np.geomspace(positive.min(), positive.max(), bins + 1)
     for k, (name, ts) in enumerate(series.items()):
         values = ts.values[column]  # type: ignore[attr-defined]
-        t, v = _thin(ts.time, values)  # type: ignore[attr-defined]
-        # raw values faintly, running median on top so that several runs stay readable
-        ax.plot(t, v, color=_color(k), lw=0.3, alpha=0.25, zorder=1)
-        ax.plot(t, _running_median(v), color=_color(k), lw=1.0, label=name, zorder=3)
+        # raw values faintly (each walker), the median over time bins (all walkers) on top,
+        # so that several runs stay readable
+        for t, v in _pieces(ts, column):
+            ax.plot(t, v, color=_color(k), lw=0.3, alpha=0.25, zorder=1)
+        ax.plot(*_binned_median(ts.time, values), color=_color(k), lw=1.0, label=name,
+                zorder=3)  # type: ignore[attr-defined]  # fmt: skip
         counts, _ = np.histogram(values, bins=edges)
         hist.stairs(counts / max(counts.sum(), 1), edges, orientation="horizontal",
                     color=_color(k), lw=0.6)  # fmt: skip

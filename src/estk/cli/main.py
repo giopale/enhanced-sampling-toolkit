@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -114,9 +115,12 @@ def init(
 
 
 def _discover_cvs(root: Path, pattern: str) -> list[str]:
+    from estk.io.plumed import find_walkers, walker_file
+
     colvar = load_config(_state["config"]).files.colvar if _state["config"] else "COLVAR"
     for folder in sorted(p for p in root.glob(pattern) if p.is_dir()):
-        path = folder / colvar
+        walkers = find_walkers(folder, colvar)
+        path = walker_file(folder, colvar, walkers[0]) if walkers else folder / colvar
         if path.is_file():
             log.debug("reading CV names from %s", path)
             return [name for name in read_colvar_fields(path) if not is_bias_column(name)]
@@ -130,12 +134,24 @@ def runs() -> None:
     from estk.project import Project
 
     project = Project(load_config(_state["config"]))
-    table = Table("run", "T (K)", "timestep (ps)", "bias", "bias factor", "walls", "units")
+    any_walkers = any(run.walkers is not None for run in project.runs)
+    table = Table("run", *(["walkers"] if any_walkers else []), "T (K)", "timestep (ps)", "bias",
+                  "bias factor", "walls", "units")  # fmt: skip
+    unshared = []
     for run in project.runs:
         meta = run.metadata
         walls = ", ".join(f"{cv} [{_fmt(lo)}, {_fmt(hi)}]" for cv, (lo, hi) in meta.walls.items())
+        if run.walkers is None:
+            walkers = "-"
+        elif len(run.walkers) == 1:
+            walkers = f"walker {run.walkers[0]}"
+        else:
+            walkers = f"{len(run.walkers)} pooled"
+            if not meta.walkers_mpi:
+                unshared.append(run.name)
         table.add_row(
             run.name,
+            *([walkers] if any_walkers else []),
             _fmt(meta.temperature),
             _fmt(meta.timestep),
             meta.bias_column or "-",
@@ -144,6 +160,12 @@ def runs() -> None:
             f"{meta.time_units}, {meta.energy_units}",
         )
     console.print(table)
+    if unshared:
+        err_console.print(
+            f"[yellow]{', '.join(unshared)}: walkers pooled but the bias has no WALKERS_MPI; "
+            "pooling is right only if they share one bias[/yellow]",
+            highlight=False,
+        )
     overridden = sorted(
         {k for r in project.runs for k, v in r.metadata.sources.items() if v == CONFIG_FILENAME}
     )
@@ -168,7 +190,7 @@ def cvs(
     for run in project.runs:
         data = run.load_cvs(names, time=time, bias=False)
         ranges = [f"{data[n].min():.4g} – {data[n].max():.4g}" for n in names]
-        span = f"{data.time[0] / 1000:.3g} – {data.time[-1] / 1000:.3g}"
+        span = f"{data.time.min() / 1000:.3g} – {data.time.max() / 1000:.3g}"
         notes = data.report.summary().split(", ", 1)
         walls = data.report.wall_summary() or "-"
         table.add_row(
@@ -235,6 +257,13 @@ def reweight(
     compress: Annotated[
         bool, typer.Option("--compress", help="Write gzip-compressed files (.dat.gz).")
     ] = False,
+    blocks: Annotated[
+        int,
+        typer.Option(
+            help="Split each run into N time blocks (<run>.b1, ...): their spread is the error "
+            "bar of one simulation, e.g. of walkers sharing a bias."
+        ),
+    ] = 1,
 ) -> None:
     """Reweight every run to a free-energy surface (or property average) on a common grid.
 
@@ -257,6 +286,7 @@ def reweight(
         jobs=jobs,
         skip_failed=skip_failed,
         combine=mode,
+        blocks=blocks,
     )
     folder = output or Path("reweight-" + "-".join([*names, *([prop] if prop else [])]))
     paths = result.save(folder, compress=compress)
@@ -289,7 +319,11 @@ def reweight(
         )
     console.print(table)
     if mode:
-        console.print(f"runs combined with mode '{mode}' -> combined.dat")
+        what = f"{blocks} blocks per run" if blocks > 1 else "runs"
+        console.print(f"{what} combined with mode '{mode}' -> combined.dat")
+    if blocks > 1:
+        console.print(f"the spread between blocks (fes.err) is about √{blocks} times the "
+                      "standard error of the combined surface", style="dim")  # fmt: skip
     if include_walls:
         console.print("wall energies are included in the bias")
     for run_name, reason in result.failed.items():
@@ -521,9 +555,10 @@ def mep(
         barriers = path.profile_barriers()
         values = np.array(list(barriers.values()))
         listed = ", ".join(f"{k}: {v:.2f}" for k, v in barriers.items())
-        console.print(f"barrier on each run along this path ({surface.units}): {listed}")
+        kind = "block" if all(re.search(r"\.b\d+$", k) for k in barriers) else "run"
+        console.print(f"barrier on each {kind} along this path ({surface.units}): {listed}")
         if len(values) > 1:
-            console.print(f"  spread between runs: {np.std(values):.2f} {surface.units}")
+            console.print(f"  spread between {kind}s: {np.std(values):.2f} {surface.units}")
     console.print(f"wrote {target}")
 
 
@@ -781,7 +816,8 @@ def _convergence(
             f"{row.value:g}",
             str(row.frames),
             *[f"{v * factor:.3f}" for v in (row.barrier, row.reverse_barrier,
-                                             row.reaction_energy, row.spread)],
+                                             row.reaction_energy)],
+            f"{row.spread * factor:.3f}" if np.isfinite(row.spread) else "-",
         )  # fmt: skip
     console.print(table)
     console.print(f"energies in {unit_label}; wrote {table_path} and convergence.png/.pdf")
@@ -984,19 +1020,26 @@ def check_model_deviation(
     for run in project.runs:
         ts = read_timeseries(run, [column], name)
         if time is not None:
-            keep = (ts.time >= time[0]) & (ts.time <= time[1])
-            ts.time = ts.time[keep]
-            ts.values = {k: v[keep] for k, v in ts.values.items()}
+            ts = ts.select((ts.time >= time[0]) & (ts.time <= time[1]))
         series[run.name] = ts
     table = Table("run", "frames", f"< {low:g}", f"{low:g} - {high:g}", f">= {high:g}", "mean",
                   "max")  # fmt: skip
-    for run_name, ts in series.items():
-        stats = deviation_stats(ts, column, low, high)
+
+    def add(label: str, part: object, **style: Any) -> None:
+        stats = deviation_stats(part, column, low, high)  # type: ignore[arg-type]
         table.add_row(
-            run_name, str(stats.frames), f"{100 * stats.below:.1f} %",
+            label, str(stats.frames), f"{100 * stats.below:.1f} %",
             f"{100 * stats.between:.1f} %", f"{100 * stats.above:.1f} %", f"{stats.mean:.3g}",
-            f"{stats.maximum:.3g}",
+            f"{stats.maximum:.3g}", **style,
         )  # fmt: skip
+
+    for run_name, ts in series.items():
+        if ts.walker is None:
+            add(run_name, ts)
+            continue
+        for walker, rows in ts.segments():  # each walker, then all of them
+            add(f"{run_name}.w{walker}", ts.select(rows), style="dim")
+        add(f"{run_name} (all)", ts, end_section=True)
     console.print(table)
     use_agg()
     with plot_style(style):

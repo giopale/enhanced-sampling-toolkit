@@ -405,3 +405,25 @@ def test_reads_old_format(tmp_path):
     assert surface.grid.points == (3, 2)
     np.testing.assert_allclose(surface.values, Z)
     assert surface.metadata["log_weight_total"] == 12.5
+
+
+def test_binned_kde_matches_exact():
+    rng = np.random.default_rng(7)
+    points = rng.normal(size=(60_000, 2)) * [0.1, 0.3] + [2.0, 1.5]
+    log_w = rng.normal(size=60_000)
+    grid = Grid(("x", "y"), (1.6, 0.5), (2.4, 2.5), (41, 31))
+    h = np.array([0.02, 0.05])
+    exact, _ = kde_on_grid(points, log_w, grid, h, binned=False)
+    binned, _ = kde_on_grid(points, log_w, grid, h, binned=True)
+    f_exact, f_binned = exact.max() - exact, binned.max() - binned  # F / kT
+    assert np.abs(f_exact - f_binned)[f_exact < 5].max() < 0.01
+    # property averages too, and 1D
+    q = points[:, 1] ** 2
+    _, avg_exact = kde_on_grid(points, log_w, grid, h, quantities={"q": q}, binned=False)
+    _, avg_binned = kde_on_grid(points, log_w, grid, h, quantities={"q": q}, binned=True)
+    near = f_exact < 5
+    np.testing.assert_allclose(avg_binned["q"][near], avg_exact["q"][near], rtol=2e-3)
+    line = Grid(("x",), (1.6,), (2.4,), (41,))
+    e1, _ = kde_on_grid(points[:, :1], log_w, line, h[:1], binned=False)
+    b1, _ = kde_on_grid(points[:, :1], log_w, line, h[:1], binned=True)
+    assert np.abs((e1.max() - e1) - (b1.max() - b1))[(e1.max() - e1) < 5].max() < 0.01

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +44,7 @@ class Bias:
     bias_factor: float | None = None
     temperature: float | None = None
     state_file: str | None = None
+    walkers_mpi: bool = False  # WALKERS_MPI: all walkers (LAMMPS partitions) share the bias
 
     @property
     def bias_column(self) -> str:
@@ -134,10 +136,14 @@ def _read_bias(action: Action, path: Path) -> Bias:
     bias.bias_factor = _to_float(action.get("BIASFACTOR"), path, "BIASFACTOR")
     bias.temperature = _to_float(action.get("TEMP"), path, "TEMP")
     bias.state_file = action.get("STATE_WFILE") or action.get("STATE_RFILE")
+    bias.walkers_mpi = "WALKERS_MPI" in action.flags
     if bias.bias_factor is None and action.name == "OPES_METAD_EXPLORE":
         log.warning("%s: OPES_METAD_EXPLORE without BIASFACTOR", path)
     if bias.bias_factor is None and bias.state_file:
-        bias.bias_factor = read_state_bias_factor(path.parent / bias.state_file)
+        state = path.parent / bias.state_file
+        if not state.is_file():  # replicas without a shared bias: one state file per walker
+            state = walker_file(path.parent, bias.state_file, 0)
+        bias.bias_factor = read_state_bias_factor(state)
     return bias
 
 
@@ -285,3 +291,39 @@ def _to_float(value: str | None, path: Path, what: str) -> float | None:
         return float(value)  # also reads "inf"
     except ValueError:
         raise EstError(f"{path}: can't read {what}={value!r} as a number") from None
+
+
+def walker_file(folder: Path, name: str | Path, walker: int | None) -> Path:
+    """The file ``name`` of one walker in ``folder``.
+
+    LAMMPS partitions append the walker number (``log.lammps.3``); PLUMED inserts it before
+    the extension (``colvar.3.dat``; ``COLVAR.3`` without one). Both are looked for; with
+    ``walker=None`` the name is used as it is.
+    """
+    path = folder / name
+    if walker is None:
+        return path
+    appended = path.with_name(f"{path.name}.{walker}")
+    stem, dot, ext = path.name.rpartition(".")
+    inserted = path.with_name(f"{stem}.{walker}.{ext}") if dot and stem else appended
+    for candidate in (appended, inserted):
+        if candidate.is_file():
+            return candidate
+    return appended
+
+
+def find_walkers(folder: Path, name: str) -> list[int]:
+    """Numbers of the walkers that have the file ``name`` in ``folder`` (``name.<i>`` or
+    ``stem.<i>.ext``), sorted."""
+    stem, dot, ext = name.rpartition(".")
+    patterns = [re.compile(rf"{re.escape(name)}\.(\d+)")]
+    if dot and stem:
+        patterns.append(re.compile(rf"{re.escape(stem)}\.(\d+)\.{re.escape(ext)}"))
+    found = set()
+    if folder.is_dir():
+        for entry in folder.iterdir():
+            for pattern in patterns:
+                match = pattern.fullmatch(entry.name)
+                if match and entry.is_file():
+                    found.add(int(match.group(1)))
+    return sorted(found)

@@ -40,6 +40,7 @@ class RunMetadata:
     walls: dict[str, tuple[float | None, float | None]] = field(default_factory=dict)
     wall_terms: list[plumed.Wall] = field(default_factory=list)
     wall_bias_columns: list[str] = field(default_factory=list)
+    walkers_mpi: bool = False  # the bias has WALKERS_MPI
     sources: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -88,6 +89,7 @@ def read_run_metadata(
         bias = info_p.bias
         if bias is not None:
             meta.bias_label = bias.label
+            meta.walkers_mpi = bias.walkers_mpi
             _set(meta, "bias_column", bias.bias_column, plumed_input.name)
             _set(meta, "bias_factor", bias.bias_factor, plumed_input.name)
             if meta.temperature is None:
@@ -112,22 +114,43 @@ def _set(meta: RunMetadata, name: str, value: object, source: str) -> None:
 
 @dataclass(eq=False)
 class Run:
-    """One simulation run: a folder with COLVAR, the LAMMPS log and the PLUMED input."""
+    """One simulation run: a folder with COLVAR, the LAMMPS log and the PLUMED input.
+
+    With several walkers in the folder (LAMMPS partitions: ``COLVAR.0``, ``log.lammps.0``,
+    ``model_devi.0.out``, ...), ``walkers`` lists the ones that make up this run: all of them
+    when they share one bias (their frames are pooled), or one when each walker is a run of
+    its own. ``walkers=None`` is a folder with a single set of files.
+    """
 
     path: Path
     config: ProjectConfig
+    walkers: tuple[int, ...] | None = None
 
     @property
     def name(self) -> str:
+        if self.walkers is not None and len(self.walkers) == 1:
+            return f"{self.path.name}.w{self.walkers[0]}"
         return self.path.name
 
     @property
+    def walker_ids(self) -> list[int | None]:
+        """The walkers to read, ``[None]`` for a folder without walker files."""
+        return list(self.walkers) if self.walkers is not None else [None]
+
+    def file(self, name: str | Path, walker: int | None = None) -> Path:
+        """The file ``name`` of one walker of this run (or the plain file, ``walker=None``)."""
+        return plumed.walker_file(self.path, name, walker)
+
+    @property
     def colvar_path(self) -> Path:
-        return self.path / self.config.files.colvar
+        """COLVAR, or the first walker's."""
+        return self.file(self.config.files.colvar, self.walker_ids[0])
 
     @property
     def lammps_log_path(self) -> Path:
-        return self.path / self.config.files.lammps_log
+        """The LAMMPS log of the first walker (``log.lammps.<i>``) or of the run."""
+        own = self.file(self.config.files.lammps_log, self.walker_ids[0])
+        return own if own.is_file() else self.path / self.config.files.lammps_log
 
     @property
     def plumed_path(self) -> Path:
@@ -147,7 +170,7 @@ class Run:
         bias: bool = True,
         include_walls: bool = False,
     ) -> CVTable:
-        """Load CVs joined on time; see ``estk.io.colvar.load_cv_table``."""
+        """Load CVs joined on time, all walkers pooled; see ``estk.io.colvar.load_cv_table``."""
         return load_cv_table(
             self,
             cvs,
@@ -174,27 +197,52 @@ class Project:
 
     @cached_property
     def runs(self) -> list[Run]:
-        """Run folders matching ``runs.pattern`` in ``runs.root`` that contain a COLVAR file."""
+        """Run folders matching ``runs.pattern`` in ``runs.root`` that contain a COLVAR file.
+
+        A folder with walker files (``COLVAR.0``, ...) is one run of all its walkers or one run
+        per walker, as ``runs.walkers`` says (see ``RunsConfig``).
+        """
         root, pattern = self.config.runs_root, self.config.runs.pattern
         if not root.is_dir():
             raise MissingFileError(f"runs root folder not found: {root}")
         folders = sorted((p for p in root.glob(pattern) if p.is_dir()), key=_natural_key)
         runs, skipped = [], []
         for folder in folders:
-            run = Run(folder, self.config)
-            (runs if run.colvar_path.is_file() else skipped).append(run)
+            found = self._folder_runs(folder)
+            if found:
+                runs += found
+            else:
+                skipped.append(folder.name)
         if skipped:
-            log.info(
-                "skipping folders without %s: %s",
-                self.config.files.colvar,
-                ", ".join(r.name for r in skipped),
-            )
+            log.info("skipping folders without %s: %s", self.config.files.colvar,
+                     ", ".join(skipped))  # fmt: skip
         if not runs:
             raise EstError(
                 f"no run folders matching '{pattern}' with a {self.config.files.colvar} file "
                 f"in {root}"
             )
         return runs
+
+    def _folder_runs(self, folder: Path) -> list[Run]:
+        colvar = self.config.files.colvar
+        walkers = plumed.find_walkers(folder, colvar)
+        if not walkers:
+            return [Run(folder, self.config)] if (folder / colvar).is_file() else []
+        mode = self.config.runs.walkers
+        if (folder / colvar).is_file() and mode == "auto":
+            # partitioned runs never write a plain COLVAR: the numbered files are probably copies
+            log.warning("%s: %s and %s.<i> files; using %s (set runs.walkers to read the "
+                        "walkers)", folder, colvar, colvar, colvar)  # fmt: skip
+            return [Run(folder, self.config)]
+        pooled = Run(folder, self.config, tuple(walkers))
+        if mode == "auto":
+            mode = "pool" if pooled.metadata.walkers_mpi else "separate"
+            if mode == "separate":
+                log.info("%s: %d walkers without WALKERS_MPI: one run each (runs.walkers to "
+                         "change)", folder.name, len(walkers))  # fmt: skip
+        if mode == "pool":
+            return [pooled]
+        return [Run(folder, self.config, (w,)) for w in walkers]
 
     def run(self, name: str) -> Run:
         for run in self.runs:

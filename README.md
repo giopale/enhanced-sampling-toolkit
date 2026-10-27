@@ -21,7 +21,8 @@ This installs the `estk` command and the `estk` Python package.
 A step-by-step guide with example output and figures is in
 [docs/quickstart.md](docs/quickstart.md). In short:
 
-In the folder that contains your run folders (`000/`, `001/`, ...):
+In the folder that contains your run folders (`000/`, `001/`, ...; a folder can also hold the
+walkers of one multi-walker simulation, `COLVAR.0`, `COLVAR.1`, ...):
 
 ```bash
 estk init --pattern '00*'    # writes estk.yaml, with an entry for each CV found in COLVAR
@@ -32,6 +33,7 @@ estk cvs d0 cn --time 0 20   # rows kept, CV ranges and frames past walls, per r
 estk bandwidth d0 cn         # Silverman and SCV bandwidths per run; --save writes them
 estk reweight d0 cn -j 4     # per-run surfaces + all runs combined -> reweight-d0-cn/
 estk reweight d0 cn --bandwidth scv   # bandwidths by smoothed cross-validation instead
+estk reweight d0 cn --blocks 4        # error bars from time blocks (e.g. one multi-walker run)
 estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
