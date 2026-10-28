@@ -174,10 +174,28 @@ class ReactionConfig(_Section):
     end: dict[str, float] = Field(default_factory=dict)
 
 
+ENERGY_UNITS = {"kj/mol": "kJ/mol", "kcal/mol": "kcal/mol", "ev": "eV", "kt": "kT"}
+
+
 class PlotConfig(_Section):
-    """Default plot settings."""
+    """Default plot settings: the style and the energy units of figures and tables.
+
+    Files always keep the units of the bias; these are for display. ``--style`` and ``--units``
+    override them for one command.
+    """
 
     style: str = "paper"
+    units: str = "eV"
+
+    @field_validator("units")
+    @classmethod
+    def _known_units(cls, value: str) -> str:
+        try:
+            return ENERGY_UNITS[value.lower()]
+        except KeyError:
+            raise ValueError(
+                f"unknown energy units {value!r}; use kJ/mol, kcal/mol, eV or kT"
+            ) from None
 
 
 class ProjectConfig(_Section):
@@ -458,7 +476,8 @@ def config_template(*, root: str = ".", pattern: str = "*", cvs: list[str] | Non
         "#   end: {cn: 1.0}",
         "",
         "plot:",
-        "  style: paper",
+        "  style: paper    # paper, slides, or a .mplstyle file",
+        "  units: eV       # energies in figures and tables: kJ/mol, kcal/mol, eV or kT",
         "",
     ]
     return "\n".join(lines)

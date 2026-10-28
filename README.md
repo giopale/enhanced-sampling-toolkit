@@ -38,11 +38,11 @@ estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
 estk info reweight-d0-cn/combined.dat  # grid, units and how a surface or path was made
-estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat --units eV
-estk plot surface reweight-d0-cn/*.dat --units eV       # all runs side by side
-estk plot path reweight-d0-cn/combined.mep.dat --units eV -o profile.pdf
-estk convergence time d0 cn --until 20 --step 1 --units eV          # barrier vs time
-estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08 --units eV  # vs bandwidth
+estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat
+estk plot surface reweight-d0-cn/*.dat       # all runs side by side
+estk plot path reweight-d0-cn/combined.mep.dat -o profile.pdf
+estk convergence time d0 cn --until 20 --step 1          # barrier vs time
+estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08  # vs bandwidth
 estk check opes                                # c(t), zed, neff, nker of each run
 estk check model-deviation --levels 0.2,0.35   # ML potential trust levels
 ```

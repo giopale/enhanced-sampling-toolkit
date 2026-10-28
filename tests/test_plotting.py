@@ -178,3 +178,44 @@ def test_explicit_levels(surface, workdir):
     )
     assert result.exit_code == 0, result.output
     assert runner.invoke(app, ["plot", "surface", "s.dat", "--levels", "0,a"]).exit_code == 1
+
+
+def test_default_units_and_style_come_from_the_project(surface, workdir, monkeypatch):
+    import estk.plotting
+
+    seen = {}
+    real_surface, real_profile, real_style = (
+        estk.plotting.plot_surface, estk.plotting.plot_path_profile, estk.plotting.plot_style,
+    )  # fmt: skip
+
+    def spy(name, real):
+        def wrapper(*args, **kwargs):
+            seen[name] = kwargs.get("units", args[0] if name == "style" else None)
+            return real(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(estk.plotting, "plot_surface", spy("surface", real_surface))
+    monkeypatch.setattr(estk.plotting, "plot_path_profile", spy("profile", real_profile))
+    monkeypatch.setattr(estk.plotting, "plot_style", spy("style", real_style))
+    surface.save(workdir / "s.dat")
+    runner = CliRunner()
+    assert runner.invoke(app, ["mep", "s.dat"]).exit_code == 0
+
+    # no estk.yaml: eV and the paper style
+    assert runner.invoke(app, ["plot", "surface", "s.dat"]).exit_code == 0
+    assert seen == {"surface": "eV", "style": "paper"}
+    # estk.yaml sets both; the options override
+    (workdir / "estk.yaml").write_text("plot:\n  units: kj/mol\n  style: slides\n")
+    assert runner.invoke(app, ["plot", "path", "s.mep.dat"]).exit_code == 0
+    assert seen["profile"] == "kJ/mol" and seen["style"] == "slides"
+    result = runner.invoke(app, ["plot", "path", "s.mep.dat", "--units", "kT", "--style", "paper"])
+    assert result.exit_code == 0, result.output
+    assert seen["profile"] == "kT" and seen["style"] == "paper"
+
+
+def test_plot_units_setting():
+    assert ProjectConfig().plot.units == "eV"
+    assert ProjectConfig.model_validate({"plot": {"units": "KCAL/MOL"}}).plot.units == "kcal/mol"
+    with pytest.raises(ValueError, match="unknown energy units"):
+        ProjectConfig.model_validate({"plot": {"units": "hartree"}})

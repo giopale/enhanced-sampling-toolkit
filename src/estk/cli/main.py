@@ -563,11 +563,21 @@ def mep(
 
 
 UnitsOption = Annotated[
-    str | None, typer.Option(help="Energy units shown: kJ/mol, kcal/mol, eV or kT.")
+    str | None,
+    typer.Option(help="Energy units shown: kJ/mol, kcal/mol, eV or kT (default: plot.units, eV)."),
 ]
 StyleOption = Annotated[
-    str, typer.Option(help="Plot style: paper (default), slides, or a .mplstyle file.")
+    str | None,
+    typer.Option(help="Plot style: paper, slides, or a .mplstyle file (default: plot.style)."),
 ]
+
+
+def _display(units: str | None = None, style: str | None = None) -> tuple[str, str]:
+    """Energy units and plot style: the command's options, else plot.* in estk.yaml."""
+    plot = load_config(_state["config"]).plot
+    return units or plot.units, style or plot.style
+
+
 OutputsOption = Annotated[
     list[Path] | None,
     typer.Option("--output", "-o", help="Output file(s); the extension sets the format (repeat)."),
@@ -640,7 +650,8 @@ def plot_surface_command(
     ] = None,
     units: UnitsOption = None,
     vmax: Annotated[
-        float | None, typer.Option(help="Top of the colour scale (default 20 kT).")
+        float | None,
+        typer.Option(help="Top of the colour scale, in the units shown (default 20 kT)."),
     ] = None,
     step: Annotated[
         float | None,
@@ -654,7 +665,7 @@ def plot_surface_command(
     contour_labels: Annotated[
         str, typer.Option(help="Numbers on the contour lines: all, some (default) or none.")
     ] = "some",
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     output: OutputsOption = None,
 ) -> None:
     """Free-energy map (or property map / 1D profile), optionally with a path on top."""
@@ -665,6 +676,7 @@ def plot_surface_command(
     from estk.plotting.core import use_agg
     from estk.surface import Surface
 
+    units, style = _display(units, style)
     use_agg()
     level_list = None
     if levels is not None:
@@ -705,7 +717,7 @@ def plot_path_command(
     annotate: Annotated[
         bool, typer.Option("--annotate/--no-annotate", help="Write the barriers in the plot.")
     ] = True,
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     output: OutputsOption = None,
 ) -> None:
     """Free energy along a minimum energy path, with each run's profile and the barriers."""
@@ -715,6 +727,7 @@ def plot_path_command(
     from estk.plotting import plot_path_profile, plot_style
     from estk.plotting.core import use_agg
 
+    units, style = _display(units, style)
     use_agg()
     mep_path = MinimumEnergyPath.load(file)
     name = file.name.removesuffix(".dat")
@@ -754,7 +767,7 @@ def _convergence(
     min_depth: float,
     reverse: bool,
     units: str | None,
-    style: str,
+    style: str | None,
     save_steps: bool,
     output: Path | None,
 ) -> None:
@@ -766,6 +779,7 @@ def _convergence(
     from estk.plotting.core import use_agg
     from estk.project import Project
 
+    units, style = _display(units, style)
     mode = _combine_mode(combine)
     if mode is None:
         raise EstError("--combine none: the barrier is measured on the combined surface")
@@ -853,7 +867,7 @@ def convergence_time(
     min_depth: Annotated[float, typer.Option(help="Minimum basin depth, kT.")] = 2.0,
     reverse: Annotated[bool, typer.Option("--reverse", help="Swap the path's ends.")] = False,
     units: UnitsOption = None,
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     save_steps: Annotated[
         bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
     ] = False,
@@ -905,7 +919,7 @@ def convergence_bandwidth(
     min_depth: Annotated[float, typer.Option(help="Minimum basin depth, kT.")] = 2.0,
     reverse: Annotated[bool, typer.Option("--reverse", help="Swap the path's ends.")] = False,
     units: UnitsOption = None,
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     save_steps: Annotated[
         bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
     ] = False,
@@ -949,7 +963,7 @@ def _save_figure(fig: object, targets: list[Path]) -> None:
 @handle_errors
 def check_opes(
     log_time: Annotated[bool, typer.Option("--log-time", help="Logarithmic time axis.")] = False,
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     output: OutputsOption = None,
 ) -> None:
     """OPES quantities (rct, zed, neff, nker) against time, and whether c(t) has levelled off."""
@@ -977,6 +991,7 @@ def check_opes(
         )  # fmt: skip
     console.print(table)
     console.print("final values; a converged run has an almost constant rct (c(t))")
+    _, style = _display(style=style)
     use_agg()
     with plot_style(style):
         fig = plot_timeseries(
@@ -999,7 +1014,7 @@ def check_model_deviation(
         str, typer.Option(help="Trust levels low,high (e.g. 0.2,0.35 eV/Å).")
     ] = "0.2,0.35",
     time: Annotated[tuple[float, float] | None, typer.Option(help="Time window in ns.")] = None,
-    style: StyleOption = "paper",
+    style: StyleOption = None,
     output: OutputsOption = None,
 ) -> None:
     """Model deviation of the ML potential: fraction of frames below, between and above the
@@ -1041,6 +1056,7 @@ def check_model_deviation(
             add(f"{run_name}.w{walker}", ts.select(rows), style="dim")
         add(f"{run_name} (all)", ts, end_section=True)
     console.print(table)
+    _, style = _display(style=style)
     use_agg()
     with plot_style(style):
         fig = plot_model_deviation(series, column, low=low, high=high)

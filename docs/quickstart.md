@@ -112,7 +112,8 @@ The other keys are:
 - `cv.<name>.source`: the file holding the CV.
 - `simulation.*`: values that can't be read from the run files.
 - `atoms`: type map and atom groups.
-- `plot.style`: the figure style.
+- `plot.style` and `plot.units`: the figure style and the energy units shown in figures
+  and tables (default `paper` and eV).
 
 `estk init` writes all of these, commented.
 
@@ -277,9 +278,9 @@ wrote reweight-d0-cn/combined.mep.dat
 ## 7. Figures
 
 ```bash
-estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat --units eV
-estk plot path reweight-d0-cn/combined.mep.dat --units eV
-estk plot surface reweight-d0-cn/0*.dat --units eV -o runs.png    # all runs side by side
+estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat
+estk plot path reweight-d0-cn/combined.mep.dat
+estk plot surface reweight-d0-cn/0*.dat -o runs.png    # all runs side by side
 ```
 
 ![Free-energy surface with the minimum energy path](images/surface.png)
@@ -291,7 +292,8 @@ point.
 
 Options:
 
-- `--units` sets the energy units: kJ/mol, kcal/mol, eV or kT.
+- `--units` sets the energy units: kJ/mol, kcal/mol, eV or kT. The default is eV, or
+  `plot.units` in `estk.yaml`.
 - `--step 0.1` puts contours at fixed intervals, and `--levels 0,0.1,0.2,0.4` at given ones.
 - `--vmax` sets the top of the colour scale.
 - `--contour-labels all|some|none` controls the numbers on the contour lines.
@@ -305,7 +307,7 @@ Options:
 How the barrier changes as more simulation time is used:
 
 ```bash
-estk convergence time d0 cn --until 1.0 --step 0.1 --units eV -j 4
+estk convergence time d0 cn --until 1.0 --step 0.1 -j 4
 ```
 
 ![Barrier against simulation time](images/convergence.png)
@@ -318,7 +320,7 @@ drops equilibration, and the band is the spread between runs. The table and the 
 Against the bandwidth of one CV:
 
 ```bash
-estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08 --num 10 --units eV
+estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08 --num 10
 ```
 
 ## 9. From Python

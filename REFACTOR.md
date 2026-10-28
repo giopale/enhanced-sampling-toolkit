@@ -858,6 +858,10 @@ Notes on what was built:
 [--annotate/--no-annotate] [--style] [-o OUT]...`. Tested in `tests/test_plotting.py`.
 
 Notes on what was built:
+- **Defaults from estk.yaml:** `plot.units` (default eV) and `plot.style` (default `paper`)
+  set the energy units and the style of every figure and of the convergence table;
+  `--units` / `--style` override them for one command. The files keep the units of the bias.
+  The Python plotting functions take `units=` explicitly (default: the surface's units).
 - `paper` style: the original JCP style (3.37 in, 6-7 pt text, inward ticks) with editable
   text in PDFs (fonttype 42), tight saving and frameless legends. Any `.mplstyle` file can be
   given instead.
