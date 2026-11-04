@@ -300,6 +300,38 @@ markers.
   Use the same values as for the surface the path came from.
 - `--x cn` plots against a CV of the path instead of the path coordinate.
 
+**CVs that weren't printed during the run** can be computed from the trajectory. Write them as
+a PLUMED input:
+
+```
+UNITS LENGTH=A TIME=1
+targetO: GROUP ATOMS=262
+Oliq: GROUP ATOMS=153-216,252-261,263
+O2cup: GROUP ATOMS=310,311,312,313,218,220
+dOOliq: DISTANCES GROUPA=targetO GROUPB=Oliq MIN={BETA=500.}
+dOO2c: DISTANCES GROUPA=targetO GROUPB=O2cup MIN={BETA=500.}
+PRINT STRIDE=1 ARG=dOOliq.min,dOO2c.min FILE=cv_analysis/CV
+```
+
+```bash
+estk cv compute driver.plumed -j 16 --save    # reads traj.<i>.lammpstrj of every walker
+estk along-path reweight-d0-cn/combined.mep.dat dOOliq.min dOO2c.min
+```
+
+- **What it does.** estk reads each run's LAMMPS dump (`--dump`, default `traj.lammpstrj`;
+  for walkers `traj.<i>.lammpstrj`) and evaluates the printed values. It writes
+  `cv_analysis/CV`, or `cv_analysis/CV.<i>` per walker, in the run folder.
+- **Using the files.** `--save` points `cv.<name>.source` in `estk.yaml` at them, so every
+  command can use the new CVs.
+- **What's supported, without PLUMED:** `GROUP`, `DISTANCE`, and `DISTANCES` with
+  `MIN={BETA=...}` or `MAX={BETA=...}`. These use PLUMED's formulas and the minimum image.
+  Other actions in the file are ignored unless a printed value needs them.
+- **Times.** The time of a frame is its step number from the dump times the timestep, so the
+  values line up with COLVAR, even where a restart wrote some steps twice.
+- **Which dumps work.** Any `dump custom` with an `id` column and coordinates (`x y z`,
+  `xu yu zu`, `xs ys zs` or `xsu ysu zsu`), orthogonal or triclinic, plain or `.gz`.
+  `dump_modify sort id` makes reading faster. `--every 10` uses every 10th frame.
+
 ## 7. Figures
 
 ```bash

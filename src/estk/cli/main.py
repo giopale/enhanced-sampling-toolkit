@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import re
 import sys
 from collections.abc import Callable
@@ -1034,6 +1035,55 @@ def convergence_bandwidth(
         combine=combine, jobs=jobs, method=method, split_axis=split_axis, min_depth=min_depth,
         reverse=reverse, units=units, style=style, save_steps=save_steps, output=output,
     )  # fmt: skip
+
+
+cv_app = typer.Typer(help="CVs computed from the trajectories.", no_args_is_help=True)
+app.add_typer(cv_app, name="cv")
+
+
+@cv_app.command("compute")
+@handle_errors
+def cv_compute(
+    plumed_input: Annotated[
+        Path, typer.Argument(help="PLUMED input defining the CVs and the PRINT file(s).")
+    ],
+    dump: Annotated[
+        str, typer.Option(help="LAMMPS dump in each run folder (walkers: traj.<i>.lammpstrj).")
+    ] = "traj.lammpstrj",
+    every: Annotated[int, typer.Option(help="Use every n-th frame of the dump.")] = 1,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="Dumps read in parallel.")] = 1,
+    save: Annotated[
+        bool, typer.Option("--save", help="Set cv.<name>.source in estk.yaml to the files written.")
+    ] = False,
+) -> None:
+    """Compute the CVs printed by a PLUMED input on every frame of each run's dump, without
+    PLUMED (DISTANCE, DISTANCES with MIN/MAX). Times are step x timestep, as in COLVAR."""
+    from estk.config import set_cv_values
+    from estk.cv import CVProgram, compute_cvs
+    from estk.project import Project
+
+    config = load_config(_state["config"])
+    if save and config.path is None:
+        raise EstError(f"--save: no {CONFIG_FILENAME} found (run estk init first)")
+    project = Project(config)
+    written = compute_cvs(project.runs, plumed_input, dump=dump, every=every, jobs=jobs)
+    table = Table("run", "walker", "frames", "steps", "file")
+    for item in written:
+        steps = f"{item.first_step} – {item.last_step}"
+        walker = "-" if item.walker is None else str(item.walker)
+        table.add_row(item.run, walker, str(item.frames), steps,
+                      os.path.relpath(item.path, config.runs_root))  # fmt: skip
+    console.print(table)
+    program = CVProgram.from_plumed(plumed_input)
+    sources = {arg: p.file for p in program.prints for arg in p.args}
+    if save:
+        set_cv_values(config.path, "source", sources)  # type: ignore[arg-type]
+        console.print(f"set cv.<name>.source in {config.path}: "
+                      + ", ".join(f"{n} -> {f}" for n, f in sources.items()))  # fmt: skip
+    else:
+        listed = ", ".join(sources)
+        console.print(f"to use {listed}: --save, or cv.<name>.source in {CONFIG_FILENAME}",
+                      style="dim")  # fmt: skip
 
 
 check_app = typer.Typer(help="Checks of the simulations.", no_args_is_help=True)

@@ -145,7 +145,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 12 | [Surface plotting](#12-surface-plotting) | done |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | done |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
-| 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | todo |
+| 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | in progress |
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
 | 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | in progress |
@@ -998,7 +998,25 @@ Notes on what was built:
 
 ## 15. Proton-transfer CVs
 
-**Status:** todo
+**Status:** in progress
+
+**Done so far: CVs computed from the trajectory.** `src/estk/io/lammpstrj.py` (`iter_frames`:
+any `dump custom` with `id` and `x y z`/`xu yu zu`/`xs ys zs`/`xsu ysu zsu`, atoms in any
+order, orthogonal or triclinic boxes, `.gz`), `src/estk/cv/` (`CVProgram`, `compute_cvs`) and
+`estk cv compute PLUMED_INPUT [--dump traj.lammpstrj] [--every N] [-j N] [--save]`. Tested in
+`tests/test_cv.py`.
+- The CVs are defined by a PLUMED input. The same file works with `plumed driver`, which
+  needs PLUMED built with the molfile plugins to read LAMMPS dumps. Built in, without
+  PLUMED: `UNITS`, `GROUP`, `DISTANCE`, `DISTANCES` with `MIN={BETA}`/`MAX={BETA}` (PLUMED's
+  smooth minimum b / log sum exp(b / r_i)), minimum image unless `NOPBC`. Other actions are
+  ignored unless a printed value needs them. Checked against direct sums.
+- **Times from the dump's step numbers** (step x timestep, in COLVAR's time units). `plumed
+  driver --trajectory-stride` counts frames instead, so after a restart that wrote steps
+  twice its times no longer match COLVAR, and the join on time pairs the wrong frames.
+- Walkers: each walker's dump (`traj.<i>.lammpstrj`) gives `FILE.<i>`, found by the usual
+  walker lookup; `--save` sets `cv.<name>.source`. About 1 ms per frame (408 atoms, unsorted).
+- Left: a PLUMED backend through its Python wrapper, for any CV, where PLUMED's kernel is
+  available; the proton-transfer CVs below.
 
 ### Current state
 - `commands/proton_transfer_cv.py` computes direct/indirect proton-transfer CVs (`d`, `delta`)

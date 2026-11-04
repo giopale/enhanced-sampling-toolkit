@@ -316,17 +316,24 @@ def set_cv_bandwidths(path: Path | str, values: dict[str, float]) -> None:
     Comments, anchors and the layout of the rest of the file are kept. The result is loaded
     again to check it; on any problem the file is left as it was.
     """
+    set_cv_values(path, "bandwidth", {name: float(f"{v:.4g}") for name, v in values.items()})
+
+
+def set_cv_values(path: Path | str, key: str, values: dict[str, Any]) -> None:
+    """Write ``cv.<name>.<key>`` for each name into an existing estk.yaml (see
+    ``set_cv_bandwidths``); missing CV entries are added."""
     path = Path(path)
     original = path.read_text()
     lines = original.splitlines()
     for name, value in values.items():
-        lines = _set_cv_key(lines, name, "bandwidth", f"{value:.4g}")
+        text = f"{value:.4g}" if isinstance(value, float) else _yaml.scalar(str(value))
+        lines = _set_cv_key(lines, name, key, text)
     path.write_text("\n".join(lines) + "\n")
     try:
         config = load_config(path)
         for name, value in values.items():
-            if config.cv[name].bandwidth != float(f"{value:.4g}"):
-                raise ConfigError(f"could not set cv.{name}.bandwidth", path=path)
+            if getattr(config.cv[name], key) != value:
+                raise ConfigError(f"could not set cv.{name}.{key}", path=path)
     except Exception:
         path.write_text(original)
         raise
@@ -372,7 +379,7 @@ def _set_cv_key(lines: list[str], name: str, key: str, value: str) -> list[str]:
             if "&" in rest or "*" in rest or not rest.startswith("{"):
                 raise ConfigError(f"cannot edit cv.{name} ({rest}); set {key} by hand")
             mapping = yaml.safe_load(rest) or {}
-            mapping[key] = float(value)
+            mapping[key] = yaml.safe_load(value)
             flow = yaml.safe_dump(mapping, default_flow_style=True, sort_keys=False).strip()
             lines[i] = f"{' ' * indent}{key_text}: {flow}"
             return lines
