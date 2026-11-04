@@ -639,6 +639,96 @@ def _format_metadata(value: Any, width: int = 100) -> str:
     return text if len(text) <= width else text[: width - 3] + "..."
 
 
+@app.command("along-path")
+@handle_errors
+def along_path(
+    file: Annotated[Path, typer.Argument(help="Path file written by estk mep (.mep.dat).")],
+    quantities: Annotated[
+        list[str], typer.Argument(help="Quantities to average: CVs, or columns of --source files.")
+    ],
+    source: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="File of a quantity not in COLVAR/CV-<name>, e.g. "
+            "max_devi_f=model_devi.out (repeat)."
+        ),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None, typer.Option(help="Time window in ns, e.g. --time 0 20.")
+    ] = None,
+    bandwidth: Annotated[
+        list[str] | None,
+        typer.Option(help="Bandwidth of a path CV, e.g. d0=0.02, or scv / silverman."),
+    ] = None,
+    include_walls: Annotated[
+        bool, typer.Option("--include-walls", help="Add the PLUMED wall energies to the bias.")
+    ] = False,
+    combine: Annotated[str, typer.Option(help="probability (default) or equal.")] = "probability",
+    blocks: Annotated[
+        int, typer.Option(help="Time blocks per run, as runs (error bar of one simulation).")
+    ] = 1,
+    x: Annotated[str, typer.Option(help="x axis: s (path coordinate) or a CV of the path.")] = "s",
+    runs: Annotated[
+        bool, typer.Option("--runs/--no-runs", help="Draw each run's averages too.")
+    ] = True,
+    units: UnitsOption = None,
+    style: StyleOption = None,
+    output: OutputsOption = None,
+) -> None:
+    """Average other quantities along a minimum energy path: what they are, on average, at
+    each point of the path, per run and combined."""
+    import matplotlib.pyplot as plt
+
+    from estk.analysis import averages_along_path
+    from estk.io.textfile import base_name
+    from estk.paths import MinimumEnergyPath
+    from estk.plotting import labels_from_config, plot_along_path, plot_style
+    from estk.plotting.core import use_agg
+    from estk.project import Project
+
+    config = load_config(_state["config"])
+    path = MinimumEnergyPath.load(file)
+    sources = {}
+    for item in source or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name or not value:
+            raise EstError(f"--source: expected e.g. max_devi_f=model_devi.out, got {item!r}")
+        sources[name] = value
+    result = averages_along_path(
+        Project(config), path, quantities, sources=sources, time=time,
+        include_walls=include_walls, combine=combine, blocks=blocks,
+        **_parse_bandwidth(bandwidth),
+    )  # fmt: skip
+    stem = base_name(file).removesuffix(".mep")
+    data_path = result.save(file.with_name(f"{stem}.along.dat"))
+
+    k = result.saddle_index
+    table = Table("quantity", "start", "highest point", "end")
+    for q in result.quantities:
+        cells = []
+        for i in (0, k, len(result.s) - 1):  # start, highest point, end
+            value, err = result.values[q][i], result.spread[q][i]
+            cells.append(f"{value:.4g}" + (f" ± {err:.2g}" if np.isfinite(err) else ""))
+        table.add_row(q, *cells)
+    ends = (0, k, len(result.s) - 1)
+    table.add_row("effective frames", *[f"{result.effective_frames[i]:.0f}" for i in ends],
+                  style="dim")  # fmt: skip
+    console.print(table)
+    console.print("values ± spread between runs (or blocks)", style="dim")
+
+    units, style = _display(units, style)
+    use_agg()
+    with plot_style(style):
+        fig = plot_along_path(result, x=x, units=units, labels=labels_from_config(config),
+                              runs=runs)  # fmt: skip
+        targets = output or [file.with_name(f"{stem}.along.png")]
+        for target in targets:
+            fig.savefig(target)
+            console.print(f"wrote {target}")
+        plt.close(fig)
+    console.print(f"wrote {data_path}")
+
+
 @plot_app.command("surface")
 @handle_errors
 def plot_surface_command(

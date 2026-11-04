@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
-from estk.plotting.core import INK, INK_SECONDARY, SERIES, energy_scale
+from estk.errors import EstError
+from estk.plotting.core import INK, INK_SECONDARY, SERIES, axis_label, energy_scale
 
 
 def plot_path_profile(
@@ -101,3 +105,80 @@ def plt_fontsize_points(ax: Axes) -> float:
     from matplotlib.font_manager import FontProperties
 
     return FontProperties(size="x-small").get_size_in_points()
+
+
+THIN_FRAMES = 10  # images with fewer effective frames are drawn with open markers
+
+
+def plot_along_path(
+    result: object,
+    quantities: Sequence[str] | None = None,
+    *,
+    x: str | None = None,
+    units: str | None = None,
+    labels: Mapping[str, str] | None = None,
+    runs: bool = True,
+) -> Figure:
+    """The free energy along a path (top) and one panel per averaged quantity below it.
+
+    ``result`` is an ``AlongPathResult``. Each quantity's combined average is drawn in ink, with
+    the spread between runs as a grey band and each run in a series colour; images resting on
+    fewer than ``THIN_FRAMES`` effective frames have open markers. A dotted line marks the
+    highest point of the path in every panel. ``x`` is the path coordinate (default) or one of
+    the path's CVs.
+    """
+    import matplotlib.pyplot as plt
+
+    quantities = list(quantities) if quantities else result.quantities  # type: ignore[attr-defined]
+    missing = [q for q in quantities if q not in result.values]  # type: ignore[attr-defined]
+    if missing:
+        raise EstError(f"not in the result: {', '.join(missing)}")
+    names = list(result.names)  # type: ignore[attr-defined]
+    if x is None or x == "s":
+        xs, x_label = result.s, "path coordinate"  # type: ignore[attr-defined]
+    elif x in names:
+        xs = result.points[:, names.index(x)]  # type: ignore[attr-defined]
+        x_label = axis_label(x, labels)
+    else:
+        raise EstError(f"x must be 's' or a CV of the path ({', '.join(names)}), got '{x}'")
+    labels = labels or {}
+
+    width, height = plt.rcParams["figure.figsize"]
+    fig, axes = plt.subplots(
+        len(quantities) + 1, 1, sharex=True, squeeze=False, layout="constrained",
+        figsize=(width, max(height, 0.6 * height * (len(quantities) + 1))),
+    )  # fmt: skip
+    axes = axes[:, 0]
+    kbt = result.metadata.get("kbt")  # type: ignore[attr-defined]
+    factor, unit_label = energy_scale(result.units, units, kbt)  # type: ignore[attr-defined]
+    energies = result.energies * factor  # type: ignore[attr-defined]
+    saddle = result.saddle_index  # type: ignore[attr-defined]
+    thin = result.effective_frames < THIN_FRAMES  # type: ignore[attr-defined]
+
+    axes[0].plot(xs, energies, color=INK, lw=1.0, marker="o", ms=2.0, zorder=5)
+    axes[0].set_ylabel(f"F ({unit_label})")
+    run_names = list(result.runs) if runs else []  # type: ignore[attr-defined]
+    for ax, q in zip(axes[1:], quantities, strict=True):
+        values = result.values[q]  # type: ignore[attr-defined]
+        spread = result.spread[q]  # type: ignore[attr-defined]
+        if np.isfinite(spread).any():
+            ax.fill_between(xs, values - spread, values + spread, color=INK, alpha=0.12, lw=0,
+                            label="spread between runs")  # fmt: skip
+        for k, run in enumerate(run_names):
+            color = SERIES[k] if k < len(SERIES) else INK_SECONDARY
+            ax.plot(xs, result.runs[run][q], color=color, lw=0.6, label=run)  # type: ignore[attr-defined]
+        ax.plot(xs, values, color=INK, lw=1.0, zorder=5, label="all runs" if run_names else None)
+        ax.plot(xs[~thin], values[~thin], "o", color=INK, ms=2.0, zorder=6)
+        ax.plot(xs[thin], values[thin], "o", color=INK, mfc="white", ms=2.5, zorder=6)
+        ax.set_ylabel(axis_label(q, labels))
+    for ax in axes:
+        ax.axvline(xs[saddle], color=INK_SECONDARY, lw=0.6, ls=":", zorder=0)
+    axes[-1].set_xlabel(x_label)
+    if x is None or x == "s":
+        axes[-1].set_xlim(0, 1)
+    if len(quantities) and len(run_names) > 1:
+        handles, names_ = axes[1].get_legend_handles_labels()
+        axes[0].legend(handles, names_, loc="lower left", bbox_to_anchor=(0.0, 1.02),
+                       ncols=min(4, len(names_)), borderaxespad=0.0, columnspacing=1.0,
+                       handlelength=1.2)  # fmt: skip
+    return fig

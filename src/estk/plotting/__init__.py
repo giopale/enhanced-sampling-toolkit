@@ -14,7 +14,7 @@ from estk.plotting.core import (
     plot_style,
     style_path,
 )
-from estk.plotting.path import plot_path_profile
+from estk.plotting.path import plot_along_path, plot_path_profile
 from estk.plotting.surface import draw_path, plot_surface, plot_surfaces
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "SERIES",
     "draw_path",
     "labels_from_config",
+    "plot_along_path",
     "plot_convergence",
     "plot_path_profile",
     "plot_style",

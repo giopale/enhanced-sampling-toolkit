@@ -143,7 +143,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 10 | [Minimum-energy path (string method)](#10-minimum-energy-path-string-method) | done |
 | 11 | [Barrier convergence](#11-barrier-convergence) | done |
 | 12 | [Surface plotting](#12-surface-plotting) | done |
-| 13 | [CVs along the path](#13-cvs-along-the-path) | todo |
+| 13 | [CVs along the path](#13-cvs-along-the-path) | done |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
 | 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | todo |
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
@@ -908,7 +908,33 @@ Notes on what was built:
 
 ## 13. CVs along the path
 
-**Status:** todo
+**Status:** done
+
+**Done:** `src/estk/analysis/along_path.py` (`averages_along_path`, `AlongPathResult` with
+save/load), `estk.reweight.kde_at_points`, `estk.plotting.plot_along_path`, and
+`estk along-path PATH.mep.dat QUANTITY... [--source Q=FILE] [--time] [--bandwidth]
+[--include-walls] [--combine probability|equal] [--blocks N] [--x s|CV] [--runs/--no-runs]
+[--units] [--style] [-o FIG]`. It writes `<path>.along.dat` and `<path>.along.png` and prints
+each quantity at the start, the highest point and the end. Tested in `tests/test_along_path.py`.
+
+Notes on what was built:
+- **What is computed:** at each image g of the path, for each run, the kernel-weighted
+  average sum_i w_i K(g - x_i) q_i / sum_i w_i K(g - x_i) (the old `point_kernel_weights`),
+  with the reweighting weights and bandwidths (`--bandwidth` > method > estk.yaml >
+  Silverman). Checked against a direct sum to 1e-10.
+- **Runs combined like surfaces**, not by a plain mean as the old code did: each run counts by
+  its share of the density at that image (`probability`: total weight times normalised kernel
+  density; `equal`: normalised density only). The spread is the spread of the run averages
+  around that, weighted the same way. `--blocks` gives a spread for one multi-walker run.
+- **Effective frames** at each image (Kish's number of the kernel weights, summed over runs)
+  say how many frames an average rests on. Fewer than 10 gives a warning and open markers.
+- **Quantities** are loaded like CVs (COLVAR, `CV-<name>`, `cv.<name>.source`, walker files),
+  or from `--source` files (e.g. `model_devi.out`, by step); `cv.<name>.scale` applies.
+- **Figure:** F along the path on top, one panel per quantity with the combined average in
+  ink, the spread as a grey band and each run in a series colour; a dotted line at the highest
+  point in every panel. Axis labels from `cv.<name>.label`/`units`; energies in `plot.units`.
+- Not ported: the `localization.csv` panel, the per-CV axis settings in the old config (plot
+  cosmetics), and marking chosen images (`points`): the `.along.dat` table has the values.
 
 ### Current state
 - `commands/plot_cvs_along_mep.py` (≈700 lines) reloads all CV data (copy of section 5), then

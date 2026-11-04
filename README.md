@@ -38,6 +38,7 @@ estk reweight d0             # 1D profile
 estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
 estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
 estk info reweight-d0-cn/combined.dat  # grid, units and how a surface or path was made
+estk along-path reweight-d0-cn/combined.mep.dat dOOliq_min theta1   # other CVs along the path
 estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat
 estk plot surface reweight-d0-cn/*.dat       # all runs side by side
 estk plot path reweight-d0-cn/combined.mep.dat -o profile.pdf

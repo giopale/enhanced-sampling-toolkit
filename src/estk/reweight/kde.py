@@ -20,6 +20,7 @@ F < 20 kT (its sparse tails), for 7x less time on 2 million frames.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -261,3 +262,57 @@ def _whitening(bandwidth: np.ndarray, ndim: int) -> np.ndarray:
         except np.linalg.LinAlgError:
             raise EstError("the bandwidth matrix must be symmetric positive definite") from None
     raise EstError(f"bandwidth must have shape ({ndim},) or ({ndim}, {ndim})")
+
+
+@dataclass
+class PointEstimate:
+    """Kernel estimate at a set of points (e.g. the images of a path)."""
+
+    log_density: np.ndarray  # log p, normalised: weights sum to 1, kernels integrate to 1
+    averages: dict[str, np.ndarray]  # kernel-weighted average of each quantity (NaN: no data)
+    effective_frames: np.ndarray  # Kish's effective number of frames of the kernel weights
+
+
+def kde_at_points(
+    targets: np.ndarray,
+    points: np.ndarray,
+    log_weights: np.ndarray,
+    bandwidth: np.ndarray,
+    *,
+    quantities: Mapping[str, np.ndarray] | None = None,
+    memory_bytes: int = DEFAULT_MEMORY_BYTES,
+    binned: bool | None = None,
+) -> PointEstimate:
+    """The kernel estimate of ``kde_on_grid`` at ``targets`` (shape (m, ndim)), normalised.
+
+    Also gives, at each target, the effective number of frames of the kernel weights
+    ``w_i K(target - x_i)``: how many frames an average there really rests on.
+    """
+    targets = np.atleast_2d(np.asarray(targets, dtype=float))
+    points = np.asarray(points, dtype=float)
+    log_weights = np.asarray(log_weights, dtype=float).reshape(-1)
+    ndim = points.shape[1]
+    if targets.shape[1] != ndim:
+        raise EstError(f"targets have {targets.shape[1]} CVs, the frames {ndim}")
+    quantities = {k: np.asarray(v, dtype=float).reshape(-1) for k, v in (quantities or {}).items()}
+    log_weights = log_weights - _logsumexp(log_weights)  # weights sum to 1
+    transform = _whitening(bandwidth, ndim)
+    if binned is None:
+        binned = len(points) > BINNED_FRAMES
+    if binned:
+        points, log_weights, quantities = _bin_frames(points, log_weights, transform, quantities)
+    g, x = targets @ transform, points @ transform
+    log_p, averages = _log_space(g, x, log_weights, quantities, memory_bytes)
+    # sum of squared kernel weights: twice the log-weights, kernels exp(-|g - x|^2)
+    root2 = np.sqrt(2.0)
+    log_p2, _ = _log_space(g * root2, x * root2, 2 * log_weights, {}, memory_bytes)
+    with np.errstate(invalid="ignore"):
+        n_eff = np.where(np.isfinite(log_p), np.exp(2 * log_p - log_p2), 0.0)
+    # kernel normalisation: (2 pi)^(-d/2) |H|^(-1/2) = (2 pi)^(-d/2) det(L)
+    log_norm = -0.5 * ndim * np.log(2 * np.pi) + np.log(abs(np.linalg.det(transform)))
+    return PointEstimate(log_p + log_norm, averages, n_eff)
+
+
+def _logsumexp(values: np.ndarray) -> float:
+    peak = float(np.max(values))
+    return peak + float(np.log(np.sum(np.exp(values - peak))))

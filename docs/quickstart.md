@@ -275,6 +275,31 @@ wrote reweight-d0-cn/combined.mep.dat
   - `--images` sets the number of points along the path.
   - `--method split` reproduces the old scripts' choice of ends.
 
+**Other quantities along the path.** What does a third CV do while the reaction happens?
+
+```console
+$ estk along-path reweight-d0-cn/combined.mep.dat dOOliq_min dOO2c_min
+ quantity           start           highest point   end
+ dOOliq_min         2.6 ± 0.028     2.634 ± 0.021   2.679 ± 0.03
+ dOO2c_min          2.758 ± 0.069   2.696 ± 0.052   2.707 ± 0.054
+ effective frames   216             324             267
+wrote reweight-d0-cn/combined.along.png
+wrote reweight-d0-cn/combined.along.dat
+```
+
+At each image of the path, each quantity is averaged over the frames with the reweighting
+weights times a kernel centred on that image: its average at that point of the surface. This
+is done for each run, then combined like the surfaces, with the spread between runs. "Effective
+frames" is how many frames an average rests on. Images with fewer than 10 are drawn with open
+markers.
+
+- Quantities are read like CVs: from COLVAR, `CV-<name>` or `cv.<name>.source`. Other files go
+  in `--source`, e.g. `--source max_devi_f=model_devi.out` for the model deviation along the
+  path.
+- `--time`, `--bandwidth`, `--include-walls`, `--combine` and `--blocks` work as in `reweight`.
+  Use the same values as for the surface the path came from.
+- `--x cn` plots against a CV of the path instead of the path coordinate.
+
 ## 7. Figures
 
 ```bash
