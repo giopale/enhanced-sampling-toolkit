@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import gzip
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import cached_property
 from itertools import islice
 from pathlib import Path
 from typing import IO
@@ -31,9 +32,13 @@ class Box:
     matrix: np.ndarray  # (3, 3): rows a, b, c
     periodic: tuple[bool, bool, bool] = (True, True, True)
 
+    @cached_property
+    def inverse(self) -> np.ndarray:
+        return np.linalg.inv(self.matrix)
+
     def minimum_image(self, delta: np.ndarray) -> np.ndarray:
         """Shortest periodic images of displacement vectors (..., 3)."""
-        frac = delta @ np.linalg.inv(self.matrix)
+        frac = delta @ self.inverse
         for k in range(3):
             if self.periodic[k]:
                 frac[..., k] -= np.round(frac[..., k])
@@ -46,10 +51,14 @@ class Frame:
     box: Box
     ids: np.ndarray  # atom ids (LAMMPS ids = PLUMED serial numbers) of ``positions``
     positions: np.ndarray  # (atoms, 3) Cartesian, in the order of ``ids``
+    columns: dict[str, np.ndarray] = field(default_factory=dict)  # other columns, as text
 
 
-def iter_frames(path: Path | str, atoms: Sequence[int] | None = None) -> Iterator[Frame]:
-    """Yield the frames of a dump; with ``atoms``, only those ids, in that order."""
+def iter_frames(
+    path: Path | str, atoms: Sequence[int] | None = None, columns: Sequence[str] = ()
+) -> Iterator[Frame]:
+    """Yield the frames of a dump; with ``atoms``, only those ids, in that order (all atoms:
+    sorted by id). ``columns`` (e.g. ``"type"``) are also returned, as text, per atom."""
     path = Path(path)
     if not path.is_file():
         raise MissingFileError(f"dump file not found: {path}")
@@ -72,12 +81,16 @@ def iter_frames(path: Path | str, atoms: Sequence[int] | None = None) -> Iterato
             header = f.readline()
             if not header.startswith("ITEM: ATOMS"):
                 raise EstError(f"{path}: expected 'ITEM: ATOMS', got {header.strip()!r}")
-            columns = header.split()[2:]
-            i_id, i_xyz, scaled = _columns(columns, path)
+            names = header.split()[2:]
+            i_id, i_xyz, scaled = _columns(names, path)
+            missing_columns = [c for c in columns if c not in names]
+            if missing_columns:
+                raise EstError(f"{path}: no column(s) {', '.join(missing_columns)} in the dump "
+                               f"(columns: {' '.join(names)})")  # fmt: skip
             block = list(islice(f, n_atoms))
             if len(block) < n_atoms:  # the last frame was cut off
                 return
-            tokens = np.array("".join(block).split()).reshape(n_atoms, len(columns))
+            tokens = np.array("".join(block).split()).reshape(n_atoms, len(names))
             ids_text = tokens[:, i_id]
             key = " ".join(ids_text)  # same atom order as the previous frame?
             if key != order_key or rows is None:
@@ -92,10 +105,12 @@ def iter_frames(path: Path | str, atoms: Sequence[int] | None = None) -> Iterato
                     rows = np.array([position[int(a)] for a in wanted])
                 order_key = key
                 frame_ids = ids[rows]
-            xyz = tokens[rows][:, i_xyz].astype(float)
+            selected = tokens[rows]
+            xyz = selected[:, i_xyz].astype(float)
             if scaled:
                 xyz = box.lo + xyz @ box.matrix
-            yield Frame(step=step, box=box, ids=frame_ids, positions=xyz)
+            extra = {c: selected[:, names.index(c)] for c in columns}
+            yield Frame(step=step, box=box, ids=frame_ids, positions=xyz, columns=extra)
 
 
 def _open(path: Path) -> IO[str]:

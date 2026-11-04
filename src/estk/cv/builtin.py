@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from estk.errors import EstError
-from estk.io.lammpstrj import Box
+from estk.io.lammpstrj import Box, Frame
 from estk.io.plumed import Action, parse_actions
 
 # Length units of PLUMED's UNITS LENGTH=..., in Å.
@@ -49,6 +49,7 @@ class CVProgram:
     prints: list[Print]
     length_unit: float = 10.0  # Å per PLUMED length unit (PLUMED's default is nm)
     atoms: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
+    columns: tuple[str, ...] = ()  # other dump columns needed (none)
 
     @classmethod
     def from_plumed(cls, path: Path | str) -> CVProgram:
@@ -86,6 +87,9 @@ class CVProgram:
                     values[arg] = _define(arg, definitions, groups, path)
         atoms = np.unique(np.concatenate([np.r_[d.a, d.b] for d in values.values()]))
         return cls(values=values, prints=prints, length_unit=length_unit, atoms=atoms)
+
+    def evaluate_frame(self, frame: Frame) -> dict[str, float]:
+        return self.evaluate(frame.positions, frame.box)
 
     def evaluate(self, positions: np.ndarray, box: Box) -> dict[str, float]:
         """Every printed value for one frame; ``positions`` (Å) are those of ``self.atoms``."""

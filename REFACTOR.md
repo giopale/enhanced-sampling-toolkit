@@ -145,7 +145,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 12 | [Surface plotting](#12-surface-plotting) | done |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | done |
 | 14 | [Structure extraction](#14-structure-extraction) | todo |
-| 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | in progress |
+| 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | done |
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
 | 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | in progress |
@@ -998,9 +998,37 @@ Notes on what was built:
 
 ## 15. Proton-transfer CVs
 
-**Status:** in progress
+**Status:** done
 
-**Done so far: CVs computed from the trajectory.** `src/estk/io/lammpstrj.py` (`iter_frames`:
+**Proton-transfer CVs:** `src/estk/cv/proton_transfer.py` (`ProtonTransfer`) and
+`estk cv proton-transfer --kind direct|indirect --donor GROUP --acceptor GROUP [--acceptor ...]
+[--water GROUP] [--output-dir cv_analysis] [--dump] [--every] [-j] [--save]
+[--ectoolkits-compat]`. Groups are names in `atoms.groups` (as `config migrate` writes them
+from the old case file: `pt_type1`, `water_oxygens`, `site_A`, ...) or atom ids. Each acceptor
+gives `<kind>-delta-<site>` and `<kind>-d-<site>` (`site_A` -> `A`, the old names) in
+`cv_analysis/CV-<kind>-<site>[.<walker>]`; all sites are computed in one pass over the dump.
+O and H come from `atoms.type_map` and the dump's `type` column (else its `element` column).
+No MDAnalysis or ECToolkits needed. Tested in `tests/test_proton_transfer.py`.
+- **Same definition as ECToolkits' `ProtonTransferCV`** (H to nearest O; chains donor-H-
+  acceptor or with one bridge water, both directions; H bond: O-O < 3.5 Å and angle at the
+  donor <= 30°; delta = mean of d(donor, H) - d(acceptor, H), d = mean O-O; the chain with the
+  smallest |delta|, delta negated for type 2 donors). Checked against ECToolkits 0.4.4 run on
+  the same frames (`tests/data/proton_transfer/`, with the scripts that made it): equal to
+  float32 precision (MDAnalysis) for direct and indirect, to sites and to the liquid.
+- **One deliberate difference.** When the bridge waters include the acceptors or donors
+  (indirect to the liquid: acceptors and bridges are both all waters), ECToolkits also builds
+  chains whose bridge is the donor or the acceptor. Their zero-length hop gets an angle of 0°
+  or 180° from MDAnalysis depending on the sign of a floating-point zero (180° when the
+  donor-H vector has three negative components), so they pass the H-bond test by accident,
+  with delta and d half those of a direct transfer. On the test frames that changes 67 of
+  234 frames of indirect-liquid. estk never takes the donor or acceptor as bridge;
+  `--ectoolkits-compat` reproduces ECToolkits, accident included, to compare with old
+  `CV-indirect-*-liquid` files. Sites A–D (surface O, not in the bridge list) are unaffected.
+- Prefiltering bridges and acceptors by the 3.5 Å cut-off (from one O-O distance matrix per
+  frame) gives the same chains in ECToolkits' order: about 0.6 ms per frame for direct and
+  1.7 ms for indirect to 39 waters.
+
+**Also: CVs computed from the trajectory.** `src/estk/io/lammpstrj.py` (`iter_frames`:
 any `dump custom` with `id` and `x y z`/`xu yu zu`/`xs ys zs`/`xsu ysu zsu`, atoms in any
 order, orthogonal or triclinic boxes, `.gz`), `src/estk/cv/` (`CVProgram`, `compute_cvs`) and
 `estk cv compute PLUMED_INPUT [--dump traj.lammpstrj] [--every N] [-j N] [--save]`. Tested in
@@ -1016,7 +1044,7 @@ order, orthogonal or triclinic boxes, `.gz`), `src/estk/cv/` (`CVProgram`, `comp
 - Walkers: each walker's dump (`traj.<i>.lammpstrj`) gives `FILE.<i>`, found by the usual
   walker lookup; `--save` sets `cv.<name>.source`. About 1 ms per frame (408 atoms, unsorted).
 - Left: a PLUMED backend through its Python wrapper, for any CV, where PLUMED's kernel is
-  available; the proton-transfer CVs below.
+  available.
 
 ### Current state
 - `commands/proton_transfer_cv.py` computes direct/indirect proton-transfer CVs (`d`, `delta`)

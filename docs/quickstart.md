@@ -332,6 +332,35 @@ estk along-path reweight-d0-cn/combined.mep.dat dOOliq.min dOO2c.min
   `xu yu zu`, `xs ys zs` or `xsu ysu zsu`), orthogonal or triclinic, plain or `.gz`.
   `dump_modify sort id` makes reading faster. `--every 10` uses every 10th frame.
 
+**Proton-transfer CVs** (δ and d, as ECToolkits' `ProtonTransferCV`) for donor and acceptor
+oxygens named in `estk.yaml`:
+
+```yaml
+atoms:
+  type_map: {1: H, 2: O, 3: Ti}     # LAMMPS types; tells O and H apart
+  groups:
+    pt_type1: [262]
+    water_oxygens: [153, 154, 155, 156, 157]   # every atom number, no ranges
+    site_A: [311]
+    site_B: [313, 218]
+```
+
+```bash
+estk cv proton-transfer --kind direct --donor pt_type1 --acceptor site_A --acceptor site_B --save
+estk cv proton-transfer --kind indirect --donor pt_type1 --acceptor site_A \
+    --water water_oxygens --save -j 16
+```
+
+- **Output.** Each acceptor gives `<kind>-delta-<site>` and `<kind>-d-<site>`, e.g.
+  `direct-delta-A`, in `cv_analysis/CV-<kind>-<site>` (per walker `.<i>`).
+- **Sign of δ.** δ < 0 when the proton sits on the donor (type 1) side, δ > 0 on the
+  acceptor side.
+- **Frames without a chain** are NaN. estk drops those frames when it loads the CV, so use
+  δ where a hydrogen bond exists.
+- **The liquid site differs from the old code.** For indirect transfer to the liquid,
+  ECToolkits sometimes uses the donor itself as the "bridge", by a numerical accident.
+  `--ectoolkits-compat` reproduces that, to compare with old files.
+
 ## 7. Figures
 
 ```bash

@@ -1086,6 +1086,90 @@ def cv_compute(
                       style="dim")  # fmt: skip
 
 
+@cv_app.command("proton-transfer")
+@handle_errors
+def cv_proton_transfer(
+    kind: Annotated[str, typer.Option(help="direct or indirect (one bridge water).")],
+    donor: Annotated[
+        str, typer.Option(help="Type 1 oxygens: a group of atoms.groups, or ids (262 or 1-5,9).")
+    ],
+    acceptor: Annotated[
+        list[str], typer.Option(help="Type 2 oxygens, e.g. site_A (repeat: one CV pair each).")
+    ],
+    water: Annotated[
+        str | None, typer.Option(help="Bridge water oxygens (indirect), e.g. water_oxygens.")
+    ] = None,
+    output_dir: Annotated[
+        str, typer.Option(help="Folder in each run for the CV files.")
+    ] = "cv_analysis",
+    dump: Annotated[str, typer.Option(help="LAMMPS dump in each run folder.")] = "traj.lammpstrj",
+    every: Annotated[int, typer.Option(help="Use every n-th frame of the dump.")] = 1,
+    jobs: Annotated[int, typer.Option("--jobs", "-j", help="Dumps read in parallel.")] = 1,
+    save: Annotated[
+        bool, typer.Option("--save", help="Set cv.<name>.source in estk.yaml to the files written.")
+    ] = False,
+    ectoolkits_compat: Annotated[
+        bool,
+        typer.Option(
+            "--ectoolkits-compat",
+            help="Also accept bridges equal to the donor or acceptor, as ECToolkits "
+            "(to compare with old CV files; see the docs).",
+        ),
+    ] = False,
+) -> None:
+    """Proton-transfer CVs (delta, d) between donor and acceptor oxygens, as ECToolkits'
+    ProtonTransferCV, from each run's dump. Writes <kind>-delta-<site> and <kind>-d-<site>."""
+    from estk.config import set_cv_values
+    from estk.cv import ProtonTransfer, compute_cvs
+    from estk.project import Project
+
+    config = load_config(_state["config"])
+    if save and config.path is None:
+        raise EstError(f"--save: no {CONFIG_FILENAME} found (run estk init first)")
+    groups = config.atoms.groups
+
+    def atoms(spec: str, option: str) -> list[int]:
+        if spec in groups:
+            return list(groups[spec])
+        try:
+            ids: list[int] = []
+            for part in spec.split(","):
+                lo, _, hi = part.partition("-")
+                ids += list(range(int(lo), int(hi or lo) + 1))
+            return ids
+        except ValueError:
+            known = ", ".join(groups) or "none in estk.yaml"
+            raise EstError(f"--{option} {spec!r}: not a group ({known}) nor atom ids") from None
+
+    programs = []
+    for site in acceptor:
+        name = site.removeprefix("site_") if site in groups else site.replace(",", "_")
+        programs.append(ProtonTransfer(
+            kind=kind, type1=atoms(donor, "donor"), type2=atoms(site, "acceptor"),
+            water=atoms(water, "water") if water else [], name=name,
+            file=f"{output_dir}/CV-{kind}-{name}", type_map=config.atoms.type_map,
+            ectoolkits_compat=ectoolkits_compat,
+        ))  # fmt: skip
+    if not config.atoms.type_map:
+        log.info("no atoms.type_map in %s: O and H come from the dump's element column",
+                 CONFIG_FILENAME)  # fmt: skip
+    project = Project(config)
+    written = compute_cvs(project.runs, programs, dump=dump, every=every, jobs=jobs)
+    table = Table("run", "walker", "frames", "steps", "file")
+    for item in written:
+        walker = "-" if item.walker is None else str(item.walker)
+        table.add_row(item.run, walker, str(item.frames), f"{item.first_step} – {item.last_step}",
+                      os.path.relpath(item.path, config.runs_root))  # fmt: skip
+    console.print(table)
+    sources = {v: program.file for program in programs for v in program.values}
+    if save:
+        set_cv_values(config.path, "source", sources)  # type: ignore[arg-type]
+        console.print(f"set cv.<name>.source in {config.path}: {', '.join(sources)}")
+    else:
+        console.print(f"to use {', '.join(sources)}: --save, or cv.<name>.source in "
+                      f"{CONFIG_FILENAME}", style="dim")  # fmt: skip
+
+
 check_app = typer.Typer(help="Checks of the simulations.", no_args_is_help=True)
 app.add_typer(check_app, name="check")
 
