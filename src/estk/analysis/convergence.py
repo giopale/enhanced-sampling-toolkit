@@ -153,7 +153,7 @@ def barrier_convergence(
     if not values:
         raise EstError("no values to scan")
     options = dict(reweight_options or {})
-    combine = options.pop("combine", "probability") or "probability"
+    combine = options.pop("combine", "equal") or "equal"
     for key in ("time", "quantity", "source"):
         if key in options:
             raise EstError(f"'{key}' can't be set in reweight_options here")

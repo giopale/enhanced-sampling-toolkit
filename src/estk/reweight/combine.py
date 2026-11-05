@@ -2,12 +2,16 @@
 
 Modes
 -----
-``probability`` (default)
+``equal`` (default)
+    Average the runs' normalised densities: every run counts the same. Independent simulations
+    have biases shifted by different constants (OPES' normalisation, seen in ``rct``), which this
+    mode is insensitive to.
+``probability``
     Sum the runs' densities, each with its total weight ``sum_i exp(V_i / kT)``. This is the
-    same as reweighting all frames of all runs together. Kernels are normalised per run, so runs
-    with different bandwidths are combined correctly.
-``equal``
-    Average the runs' normalised densities: every run counts the same.
+    same as reweighting all frames of all runs together, right when the runs share one bias
+    (e.g. time blocks of one simulation) but tilted by the bias offsets between independent
+    simulations. Kernels are normalised per run, so runs with different bandwidths are
+    combined correctly.
 ``legacy``
     What the original scripts did, to compare with old ``-AVG.dat`` files: average the per-run
     free energies (each shifted to minimum 0) with run weights ``sum_i exp((V_i - V_max) / kT)``,
@@ -33,9 +37,7 @@ from estk.surface import Surface
 MODES = ("probability", "equal", "legacy")
 
 
-def combine(
-    surfaces: Mapping[str, Surface] | Sequence[Surface], mode: str = "probability"
-) -> Surface:
+def combine(surfaces: Mapping[str, Surface] | Sequence[Surface], mode: str = "equal") -> Surface:
     """Combine per-run surfaces on the same grid into one surface; see the module docstring."""
     if mode not in MODES:
         raise EstError(f"unknown combination mode '{mode}' (choose from {', '.join(MODES)})")

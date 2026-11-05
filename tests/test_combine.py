@@ -59,7 +59,7 @@ def two_runs_and_merged(tmp_path_factory):
 
 def test_probability_mode_equals_reweighting_all_frames_together(two_runs_and_merged):
     runs, merged = two_runs_and_merged
-    result = runs.reweight(["d0", "cn"], points=(21, 15))
+    result = runs.reweight(["d0", "cn"], points=(21, 15), combine="probability")
     single = merged.reweight(["d0", "cn"], points=(21, 15), combine=None).surfaces["all"]
     combined = result.combined
     assert combined.metadata["combined"] == "probability"
@@ -84,7 +84,8 @@ def test_property_combination_equals_all_frames_together(two_runs_and_merged):
             q = np.sin(3 * table["d0"]) + table["cn"]
             text = "\n".join(f"{t:.8f} {v:.10f}" for t, v in zip(table.time, q, strict=True))
             (run.path / "CV-q").write_text("#! FIELDS time q\n" + text + "\n")
-    combined = runs.reweight(["d0", "cn"], quantity="q", points=(11, 9)).combined
+    combined = runs.reweight(["d0", "cn"], quantity="q", points=(11, 9),
+                             combine="probability").combined  # fmt: skip
     single = merged.reweight(["d0", "cn"], quantity="q", points=(11, 9)).surfaces["all"]
     np.testing.assert_allclose(combined.values, single.values, rtol=1e-8, atol=1e-10)
     np.testing.assert_allclose(combined.fes, single.fes, atol=1e-8)
@@ -141,7 +142,7 @@ def test_probability_mode_with_different_bandwidths():
         d2 = ((g[:, None, :] - pts[None]) / np.array(h)) ** 2
         normal = np.exp(-0.5 * d2.sum(axis=2)) / (2 * np.pi * h[0] * h[1])
         expected += (normal @ np.exp(raw)).reshape(grid.shape)
-    combined = combine(runs)
+    combined = combine(runs, mode="probability")
     f = -kbt * np.log(expected)
     np.testing.assert_allclose(combined.values, f - f.min(), atol=1e-9)
 

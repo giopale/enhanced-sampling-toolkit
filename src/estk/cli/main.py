@@ -245,10 +245,11 @@ def reweight(
     combine: Annotated[
         str,
         typer.Option(
-            help="Combine the runs: probability (default; = all frames together), equal "
-            "(every run counts the same), legacy (as the original scripts), none."
+            help="Combine the runs: equal (default; every run counts the same), probability "
+            "(= all frames together; for runs sharing one bias), legacy (as the original "
+            "scripts), none."
         ),
-    ] = "probability",
+    ] = "equal",
     output: Annotated[
         Path | None,
         typer.Option(
@@ -414,8 +415,8 @@ def bandwidth_command(
 def combine_files(
     files: Annotated[list[Path], typer.Argument(help="Per-run surfaces written by estk reweight.")],
     mode: Annotated[
-        str, typer.Option("--mode", "-m", help="probability (default), equal or legacy.")
-    ] = "probability",
+        str, typer.Option("--mode", "-m", help="equal (default), probability or legacy.")
+    ] = "equal",
     output: Annotated[Path, typer.Option("--output", "-o", help="Output file.")] = Path(
         "combined.dat"
     ),
@@ -664,7 +665,7 @@ def along_path(
     include_walls: Annotated[
         bool, typer.Option("--include-walls", help="Add the PLUMED wall energies to the bias.")
     ] = False,
-    combine: Annotated[str, typer.Option(help="probability (default) or equal.")] = "probability",
+    combine: Annotated[str, typer.Option(help="equal (default) or probability.")] = "equal",
     blocks: Annotated[
         int, typer.Option(help="Time blocks per run, as runs (error bar of one simulation).")
     ] = 1,
@@ -951,7 +952,7 @@ def convergence_time(
         list[str] | None, typer.Option(help="Bandwidth, e.g. d0=0.02, or scv / silverman.")
     ] = None,
     include_walls: Annotated[bool, typer.Option("--include-walls")] = False,
-    combine: Annotated[str, typer.Option(help="probability, equal or legacy.")] = "probability",
+    combine: Annotated[str, typer.Option(help="equal (default), probability or legacy.")] = "equal",
     jobs: Annotated[int, typer.Option("--jobs", "-j")] = 1,
     method: Annotated[str, typer.Option(help="Minima for the path: basins or split.")] = "basins",
     split_axis: Annotated[str | None, typer.Option(help="CV to split along.")] = None,
@@ -1003,7 +1004,7 @@ def convergence_bandwidth(
         list[str] | None, typer.Option(help="Bandwidth of the other CVs, e.g. cn=0.03.")
     ] = None,
     include_walls: Annotated[bool, typer.Option("--include-walls")] = False,
-    combine: Annotated[str, typer.Option(help="probability, equal or legacy.")] = "probability",
+    combine: Annotated[str, typer.Option(help="equal (default), probability or legacy.")] = "equal",
     jobs: Annotated[int, typer.Option("--jobs", "-j")] = 1,
     method: Annotated[str, typer.Option(help="Minima for the path: basins or split.")] = "basins",
     split_axis: Annotated[str | None, typer.Option(help="CV to split along.")] = None,

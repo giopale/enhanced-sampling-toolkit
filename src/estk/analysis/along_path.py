@@ -109,7 +109,7 @@ def averages_along_path(
     bandwidth: Mapping[str, float] | None = None,
     bandwidth_method: str | None = None,
     include_walls: bool = False,
-    combine: str = "probability",
+    combine: str = "equal",
     blocks: int = 1,
 ) -> AlongPathResult:
     """Average ``quantities`` at each image of ``path`` (a path computed by ``estk mep``).

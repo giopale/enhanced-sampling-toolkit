@@ -309,8 +309,9 @@ Notes on what was built:
 - **Blocks** (`estk reweight --blocks N`): walkers that share a bias are not independent, so
   their spread is no error bar. Each run is cut into N equal spans of time (`<run>.b<k>`, all
   walkers together); the blocks are reweighted and combined like runs, so their spread
-  (`fes.err`, the barrier on each block in `estk mep`) estimates the error, and their
-  `probability` combination is the whole run's surface.
+  (`fes.err`, the barrier on each block in `estk mep`) estimates the error. Their
+  `probability` combination (`--combine probability`) is exactly the whole run's surface; the
+  default `equal` averages the blocks, which is close to it.
 - k_B T uses CODATA R = 8.314462618e-3 kJ/(mol K) (the old code used 8.3144621e-3; the relative
   difference is 1e-8) and is given in the energy units of the bias.
 
@@ -517,7 +518,11 @@ Notes on what was built:
 recombine saved per-run files without reweighting again. Tested in `tests/test_combine.py` and
 `tests/test_regression_old_code.py`.
 
-**Decided:** the corrected weighting (`probability`) is the default.
+**Decided:** `equal` is the default (it was `probability` at first). Independent OPES
+simulations, even with identical inputs, have biases shifted by different constants (OPES's
+normalisation Z, visible as different `rct`), and `probability` weights each simulation's
+frames by e^(V/kT) including that shift. `equal` is insensitive to it. `probability` remains
+right for runs that share one bias (time blocks of one simulation).
 
 Notes on what was built:
 - `probability`: runs are summed as densities, each with weight sum exp(V/kT) computed without
@@ -536,9 +541,10 @@ Notes on what was built:
 - On the 4 real test runs, `probability` and `legacy` give run weights 0.26/0.20/0.05/0.49 vs
   0.26/0.27/0.06/0.41 and surfaces that differ by 0.5 kT rms in the region below 5 kT; the
   spread between the runs themselves is 0.6 kT there.
-- Caveat to keep in mind: `probability` trusts that the bias offsets of independent runs are
-  comparable (as OPES's normalisation intends). If one run dominates the weights, compare with
-  `--combine equal`.
+- Caveat that made `equal` the default: `probability` trusts that the bias offsets of
+  independent runs are comparable. On four identical multi-walker simulations `rct` differed
+  by up to 1.2 kJ/mol after 4 ns, a factor 1.5 in the weight of every frame. A correction by
+  c(t) (weights e^((V - c(t))/kT)) would make `probability` usable across simulations.
 
 ### Current state
 - `reweight_property.run` reads all per-run files back from disk, weights each run by

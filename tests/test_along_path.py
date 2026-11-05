@@ -74,7 +74,7 @@ def test_kde_at_points_matches_brute_force(project):
 
 
 def test_averages_and_combination(project, path):
-    result = averages_along_path(project, path, ["q"])
+    result = averages_along_path(project, path, ["q"], combine="probability")
     tables = {run.name: run.load_cvs(["d0", "cn", "q"]) for run in project.runs}
     k = 4
     for name, table in tables.items():
@@ -96,7 +96,7 @@ def test_averages_and_combination(project, path):
     np.testing.assert_allclose(result.values["q"], q_of(*path.points.T), atol=0.1)
     assert result.saddle_index == 4 and result.metadata["combined"] == "probability"
 
-    equal = averages_along_path(project, path, ["q"], combine="equal")
+    equal = averages_along_path(project, path, ["q"])  # the default
     assert not np.allclose(equal.values["q"], result.values["q"])
 
 

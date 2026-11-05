@@ -206,7 +206,7 @@ def reweight(
     include_walls: bool = False,
     jobs: int = 1,
     skip_failed: bool = False,
-    combine: str | None = "probability",
+    combine: str | None = "equal",
     blocks: int = 1,
 ) -> ReweightResult:
     """Reweight every run of ``project`` onto one grid, and combine the runs.
@@ -238,7 +238,7 @@ def reweight(
         Leave out runs that fail (they are listed in ``failed``) instead of stopping.
     combine:
         How to combine the runs into ``result.combined`` (see ``estk.reweight.combine``):
-        ``"probability"``, ``"equal"``, ``"legacy"``, or None for no combination.
+        ``"equal"`` (default), ``"probability"``, ``"legacy"``, or None for no combination.
     blocks:
         Split each run into this many consecutive time blocks (``<run>.b1``, ...) and reweight
         each: the spread between them estimates the error of a single simulation, e.g. of

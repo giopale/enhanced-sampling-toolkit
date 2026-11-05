@@ -101,7 +101,8 @@ def test_pooled_surface_is_the_probability_combination(root):
     """Pooling walkers that share a bias = reweighting all their frames together."""
     pooled = Project(root / "estk.yaml").reweight(["d0", "cn"], points=(31, 21))
     (root / "estk.yaml").write_text(CONFIG.format(walkers="  walkers: separate\n"))
-    separate = Project(root / "estk.yaml").reweight(["d0", "cn"], points=(31, 21))
+    separate = Project(root / "estk.yaml").reweight(["d0", "cn"], points=(31, 21),
+                                                     combine="probability")  # fmt: skip
     assert list(separate.surfaces) == ["sim1.w0", "sim1.w1", "sim1.w2"]
     a, b = pooled.surfaces["sim1"].values, separate.combined.values
     finite = np.isfinite(a)
@@ -111,7 +112,7 @@ def test_pooled_surface_is_the_probability_combination(root):
 def test_blocks(root):
     project = Project(root / "estk.yaml")
     whole = project.reweight(["d0", "cn"], points=(31, 21)).surfaces["sim1"]
-    result = project.reweight(["d0", "cn"], points=(31, 21), blocks=3)
+    result = project.reweight(["d0", "cn"], points=(31, 21), blocks=3, combine="probability")
     assert list(result.surfaces) == ["sim1.b1", "sim1.b2", "sim1.b3"]
     assert sum(s.metadata["frames"] for s in result.surfaces.values()) == WALKERS * N
     assert result.surfaces["sim1.b2"].metadata["block_of"] == "sim1"

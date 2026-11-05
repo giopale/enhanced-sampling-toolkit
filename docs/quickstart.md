@@ -184,11 +184,11 @@ grid d0: 1.5 (estk.yaml) to 2.5 (estk.yaml), 100 points
 grid cn: 0.75 (estk.yaml) to 2.2 (PLUMED walls), 100 points
  run   frames   n_eff   h(d0)       h(cn)       weight   past walls
                         silverman   silverman
- 000   2121     81      0.02018     0.05799     0.256    d0 upper 2.2: 457 frames, max 14.1 kT
- 001   2152     92      0.01794     0.04884     0.199    ...
- 002   2122     30      0.0207      0.04843     0.051
- 003   2102     186     0.01644     0.04333     0.495
-runs combined with mode 'probability' -> combined.dat
+ 000   2121     81      0.02018     0.05799     0.250    d0 upper 2.2: 457 frames, max 14.1 kT
+ 001   2152     92      0.01794     0.04884     0.250    ...
+ 002   2122     30      0.0207      0.04843     0.250
+ 003   2102     186     0.01644     0.04333     0.250
+runs combined with mode 'equal' -> combined.dat
 wrote 5 file(s) to reweight-d0-cn/
 ```
 
@@ -205,7 +205,7 @@ This writes one surface per run, `reweight-d0-cn/000.dat` ..., and all runs comb
 | `--bandwidth d0=0.02` | kernel bandwidth of one CV |
 | `--bandwidth scv` | bandwidths by smoothed cross-validation (or `silverman`) |
 | `--include-walls` | add the PLUMED wall energies to the bias |
-| `--combine equal` | each run counts the same (default `probability`: as if all frames were one run; `legacy`: as the old scripts) |
+| `--combine probability` | weight each run by its frames' total weight, as if all frames were one run (default `equal`: each run counts the same; `legacy`: as the old scripts). Only for runs sharing one bias: independent simulations have bias offsets (different `rct`) that tilt it |
 | `--property max_devi_f --source model_devi.out` | average of a quantity instead of the free energy |
 | `--blocks 4` | split each run into 4 time blocks (`000.b1`, ...): their spread is an error bar for one simulation |
 | `--compress` | write `.dat.gz` files |
@@ -247,15 +247,15 @@ bandwidths, runs and their weights, and time ranges.
 ```console
 $ estk mep reweight-d0-cn/combined.dat
  minimum   d0      cn      F (kj/mol)   depth (kT)
- 1         1.864   0.999   0.000        global
- 2         2.106   1.98    11.208       11.81
-path from (d0=2.106, cn=1.98) to (d0=1.864, cn=0.999), 15 images
+ 1         1.874   0.984   0.000        global
+ 2         2.106   1.98    8.046        11.24
+path from (d0=2.106, cn=1.98) to (d0=1.874, cn=0.9843), 15 images
 ends: start nearest cn=2 (reaction.start); end the lowest other minimum
-barrier          34.161 kj/mol = 0.3540 eV = 11.74 kT
-reverse barrier  45.369 kj/mol = 0.4702 eV = 15.59 kT
-reaction         -11.208 kj/mol = -0.1162 eV = -3.85 kT
-barrier on each run along this path (kj/mol): 000: 42.44, 001: 43.29, 002: 31.94, 003: 63.12
-  spread between runs: 11.27 kj/mol
+barrier          32.687 kj/mol = 0.3388 eV = 11.23 kT
+reverse barrier  40.733 kj/mol = 0.4222 eV = 14.00 kT
+reaction         -8.046 kj/mol = -0.0834 eV = -2.77 kT
+barrier on each run along this path (kj/mol): 000: 42.48, 001: 43.27, 002: 31.91, 003: 62.23
+  spread between runs: 10.93 kj/mol
 wrote reweight-d0-cn/combined.mep.dat
 ```
 
@@ -280,9 +280,9 @@ wrote reweight-d0-cn/combined.mep.dat
 ```console
 $ estk along-path reweight-d0-cn/combined.mep.dat dOOliq_min dOO2c_min
  quantity           start           highest point   end
- dOOliq_min         2.6 ± 0.028     2.634 ± 0.021   2.679 ± 0.03
- dOO2c_min          2.758 ± 0.069   2.696 ± 0.052   2.707 ± 0.054
- effective frames   216             324             267
+ dOOliq_min         2.591 ± 0.015   2.629 ± 0.023   2.666 ± 0.03
+ dOO2c_min          2.716 ± 0.063   2.688 ± 0.055   2.692 ± 0.06
+ effective frames   216             308             268
 wrote reweight-d0-cn/combined.along.png
 wrote reweight-d0-cn/combined.along.dat
 ```
@@ -487,8 +487,8 @@ estk reweight d0 cn --blocks 4
 estk mep reweight-d0-cn/combined.dat     # barrier on each block, and their spread
 ```
 
-The `probability` combination of the blocks is the surface of the whole simulation. The spread
-between blocks is about √4 times the standard error of that surface. Drop the start-up period
+The combined surface is the average of the blocks (`--combine probability` gives exactly the
+whole simulation's surface instead). The spread between blocks is about √4 times the standard error of that surface. Drop the start-up period
 first (`--time <start> inf`, see `estk check opes`), so the blocks don't include it. Two
 independent multi-walker simulations (`000/`, `001/`) give an error bar that doesn't depend on
 the bias having settled.
