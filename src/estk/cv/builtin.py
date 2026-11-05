@@ -68,8 +68,14 @@ class CVProgram:
             elif action.name == "GROUP" and action.label:
                 groups[action.label] = _atoms(action.get("ATOMS") or "", groups, path)
             elif action.name == "PRINT":
+                file = action.get("FILE") or "COLVAR"
+                if "$" in file:
+                    raise EstError(
+                        f"{path}: PRINT FILE={file} contains '$', probably a shell variable left "
+                        "from a script; give the plain name (estk adds .<walker> for walkers)"
+                    )
                 prints.append(Print(
-                    file=action.get("FILE") or "COLVAR",
+                    file=file,
                     args=action.get_list("ARG"),
                     stride=int(action.get("STRIDE") or 1),
                 ))  # fmt: skip

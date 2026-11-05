@@ -162,7 +162,8 @@ def test_builtin_cvs_match_brute_force(tmp_path):
      ("d: DISTANCE ATOMS=1,2\n", "no PRINT"),
      ("d: DISTANCE ATOMS=1,2,3\nPRINT ARG=d FILE=x\n", "two atoms"),
      ("d: DISTANCE ATOMS=1,@water\nPRINT ARG=d FILE=x\n", "not understood"),
-     ("UNITS LENGTH=furlong\nd: DISTANCE ATOMS=1,2\nPRINT ARG=d FILE=x\n", "UNITS")],
+     ("UNITS LENGTH=furlong\nd: DISTANCE ATOMS=1,2\nPRINT ARG=d FILE=x\n", "UNITS"),
+     ("d: DISTANCE ATOMS=1,2\nPRINT ARG=d FILE=cv/CV.$w\n", "shell variable")],
 )  # fmt: skip
 def test_builtin_errors(tmp_path, text, message):
     (tmp_path / "p.plumed").write_text(text)
