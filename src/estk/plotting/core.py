@@ -7,7 +7,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import matplotlib
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import Colormap, LinearSegmentedColormap, is_color_like
 
 from estk.errors import EstError
 from estk.units import energy_factor
@@ -37,6 +37,30 @@ _BLUE_STEPS = (
 FREE_ENERGY_CMAP = LinearSegmentedColormap.from_list(
     "estk_free_energy", [*_BLUE_STEPS[::-1], "#e6f0fc"]
 ).with_extremes(over="white", bad="white")
+
+
+def one_color_cmap(color: str, *, low_is_dark: bool = True) -> Colormap:
+    """A colour map from ``color`` to white (``low_is_dark``: ``color`` at the lowest value),
+    white above the range and where there is no data, e.g. ``one_color_cmap("#2659D8")``."""
+    stops = [color, "white"] if low_is_dark else ["white", color]
+    return LinearSegmentedColormap.from_list(f"estk_{color}", stops).with_extremes(
+        over="white", bad="white"
+    )
+
+
+def resolve_cmap(cmap: str | Colormap | None, default: Colormap) -> Colormap:
+    """``None``: ``default``; a matplotlib name (``viridis``) or a colour (``#2659D8``, ``navy``,
+    giving ``one_color_cmap``); or a ``Colormap`` as it is."""
+    if cmap is None:
+        return default
+    if isinstance(cmap, Colormap):
+        return cmap
+    if cmap in matplotlib.colormaps:
+        return matplotlib.colormaps[cmap].with_extremes(bad="white")
+    if is_color_like(cmap):
+        return one_color_cmap(cmap)
+    raise EstError(f"colour map {cmap!r}: not a matplotlib colour map nor a colour")
+
 
 # Property averages: a second one-hue scale (orange), as the second sequential context.
 _ORANGE_STEPS = ("#fde4d6", "#f9c3a6", "#f4a079", "#ef7d4e", "#eb6834", "#c9501f", "#9e3b12")

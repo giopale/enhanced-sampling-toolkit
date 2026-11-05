@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 from matplotlib import patheffects
 from matplotlib.axes import Axes
+from matplotlib.colors import Colormap
 from matplotlib.figure import Figure
 from matplotlib.ticker import MaxNLocator
 
@@ -20,6 +21,7 @@ from estk.plotting.core import (
     SERIES,
     axis_label,
     energy_scale,
+    resolve_cmap,
 )
 from estk.surface import Surface
 
@@ -40,6 +42,7 @@ def plot_surface(
     labels: Mapping[str, str] | None = None,
     colorbar: bool = True,
     title: str | None = None,
+    cmap: str | Colormap | None = None,
 ) -> Axes:
     """Draw one surface on ``ax`` (a new figure if None) and return the axes.
 
@@ -54,7 +57,9 @@ def plot_surface(
     (``"some"``, default) or on ``"none"``.
 
     ``units`` converts free energies for display (``"kJ/mol"``, ``"eV"``, ``"kT"``, ...).
-    ``vmax`` defaults to 20 kT (free energies) or the data range (properties).
+    ``vmax`` defaults to 20 kT (free energies) or the data range (properties). ``cmap``: a
+    matplotlib colour map or its name, or one colour (``"#2659D8"``: that colour at the lowest
+    value fading to white, see ``one_color_cmap``).
     """
     import matplotlib.pyplot as plt
 
@@ -82,7 +87,7 @@ def plot_surface(
         else:
             lo, hi = _color_range(surface, values, finite, vmin, vmax, kbt, factor)
         spacing = levels if levels is not None else contour_step
-        _plot_map_2d(ax, surface, values, lo, hi, spacing, contour_labels, labels)
+        _plot_map_2d(ax, surface, values, lo, hi, spacing, contour_labels, labels, cmap)
         if colorbar:
             _colorbar(ax.figure, ax.collections[0], ax, value_label)
         if path is not None:
@@ -105,6 +110,7 @@ def plot_surfaces(
     levels: Sequence[float] | None = None,
     contour_labels: str = "some",
     labels: Mapping[str, str] | None = None,
+    cmap: str | Colormap | None = None,
 ) -> Figure:
     """Small multiples of several surfaces on the same grid, with one shared colour scale.
 
@@ -133,7 +139,7 @@ def plot_surfaces(
         plot_surface(
             surface, ax, path=path, units=units, vmax=vmax, contour_step=contour_step,
             levels=levels, contour_labels=contour_labels, labels=labels, colorbar=False,
-            title=name,
+            title=name, cmap=cmap,
         )  # fmt: skip
         if k % ncols:
             ax.set_ylabel("")
@@ -220,10 +226,11 @@ def _plot_map_2d(
     contour_step: float | Sequence[float] | None,
     contour_labels: str,
     labels: Mapping[str, str] | None,
+    cmap: str | Colormap | None = None,
 ) -> None:
     X, Y = surface.grid.mesh()
     masked = np.ma.masked_invalid(values)
-    cmap = FREE_ENERGY_CMAP if surface.is_fes else PROPERTY_CMAP
+    cmap = resolve_cmap(cmap, FREE_ENERGY_CMAP if surface.is_fes else PROPERTY_CMAP)
     # One colour band between consecutive contour lines.
     if contour_step is not None and not np.isscalar(contour_step):
         lines = np.asarray(contour_step, dtype=float)

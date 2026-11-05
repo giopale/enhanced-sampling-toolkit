@@ -219,3 +219,29 @@ def test_plot_units_setting():
     assert ProjectConfig.model_validate({"plot": {"units": "KCAL/MOL"}}).plot.units == "kcal/mol"
     with pytest.raises(ValueError, match="unknown energy units"):
         ProjectConfig.model_validate({"plot": {"units": "hartree"}})
+
+
+def test_colour_maps(surface, workdir):
+    from matplotlib.colors import to_rgba
+
+    from estk.plotting import one_color_cmap
+
+    cmap = one_color_cmap("#2659D8")
+    assert cmap(0.0) == pytest.approx(to_rgba("#2659D8")) and cmap(1.0) == pytest.approx(
+        (1, 1, 1, 1)
+    )
+    assert cmap.get_over() == pytest.approx((1, 1, 1, 1))
+    for choice in ("#2659D8", "viridis", cmap):
+        ax = plot_surface(surface, cmap=choice)
+        filled = ax.collections[0]
+        lowest = to_rgba(filled.get_cmap()(0.0))
+        expected = (
+            to_rgba("#2659D8") if choice != "viridis" else to_rgba(plt.get_cmap("viridis")(0.0))
+        )
+        assert lowest == pytest.approx(expected)
+        plt.close(ax.figure)
+    with pytest.raises(EstError, match="colour map"):
+        plot_surface(surface, cmap="not-a-colour")
+    surface.save(workdir / "s.dat")
+    result = CliRunner().invoke(app, ["plot", "surface", "s.dat", "--cmap", "#2659D8"])
+    assert result.exit_code == 0, result.output

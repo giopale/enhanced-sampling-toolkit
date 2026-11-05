@@ -11,6 +11,7 @@ from estk.plotting.core import (
     PROPERTY_CMAP,
     SERIES,
     labels_from_config,
+    one_color_cmap,
     plot_style,
     style_path,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "SERIES",
     "draw_path",
     "labels_from_config",
+    "one_color_cmap",
     "plot_along_path",
     "plot_convergence",
     "plot_path_profile",

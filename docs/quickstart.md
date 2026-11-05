@@ -383,6 +383,8 @@ Options:
 - `--step 0.1` puts contours at fixed intervals, and `--levels 0,0.1,0.2,0.4` at given ones.
 - `--vmax` sets the top of the colour scale.
 - `--contour-labels all|some|none` controls the numbers on the contour lines.
+- `--cmap '#2659D8'` colours the bands from that colour (lowest F) to white; any matplotlib
+  colour-map name works too (`--cmap viridis`).
 - `-o fes.pdf` sets the output; the extension sets the format, and the option can be repeated.
 - `--style` chooses the look: `paper` (single-column journal figure, the default), `slides`,
   or your own `.mplstyle` file. Axis labels come from `cv.<name>.label` and `units` in

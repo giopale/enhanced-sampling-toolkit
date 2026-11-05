@@ -757,6 +757,13 @@ def plot_surface_command(
     contour_labels: Annotated[
         str, typer.Option(help="Numbers on the contour lines: all, some (default) or none.")
     ] = "some",
+    cmap: Annotated[
+        str | None,
+        typer.Option(
+            help="Colour map: a matplotlib name (viridis) or one colour (#2659D8: that "
+            "colour at the lowest value, fading to white)."
+        ),
+    ] = None,
     style: StyleOption = None,
     output: OutputsOption = None,
 ) -> None:
@@ -785,12 +792,13 @@ def plot_surface_command(
             ax = plot_surface(
                 next(iter(surfaces.values())), path=mep_path, units=units, vmax=vmax,
                 contour_step=step, levels=level_list, contour_labels=contour_labels, labels=labels,
+                cmap=cmap,
             )  # fmt: skip
             fig = ax.figure
         else:
             fig = plot_surfaces(
                 surfaces, ncols=ncols, path=mep_path, units=units, vmax=vmax, contour_step=step,
-                levels=level_list, contour_labels=contour_labels, labels=labels,
+                levels=level_list, contour_labels=contour_labels, labels=labels, cmap=cmap,
             )  # fmt: skip
         for target in targets:
             fig.savefig(target)
