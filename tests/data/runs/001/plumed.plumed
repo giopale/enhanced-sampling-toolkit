@@ -1,0 +1,44 @@
+#LINE_RESTART
+UNITS LENGTH=A TIME=1
+
+hydrogens: GROUP ATOMS=1-152
+
+O2cup: GROUP ATOMS=310,311,312,313,218,220
+O2cdw: GROUP ATOMS=264,265,266,267,268,269
+O2c: GROUP ATOMS=O2cup,O2cdw
+
+targetO: GROUP ATOMS=262
+targetTi: GROUP ATOMS=378
+
+d0: DISTANCE ATOMS=targetO,targetTi
+#define more groups if needed
+
+# define reaction coordinates, e.g. CV1, CV2, ...
+# you may define as many as you want
+
+cn: COORDINATION GROUPA=targetO GROUPB=hydrogens R_0=1.2 NN=24 MM=0
+
+OPES_METAD ...
+LABEL=opes
+ARG=d0,cn
+PACE=100
+BARRIER=65
+TEMP=350
+#SIGMA=0.05,0.05
+FILE=Kernels.data
+STATE_RFILE=State.data
+STATE_WFILE=State.data
+STATE_WSTRIDE=100
+WALKERS_MPI
+... OPES_METAD
+
+
+UPPER_WALLS ARG=cn AT=2.2 KAPPA=300 EXP=2
+# LOWER_WALLS ARG=cn AT=0.75 KAPPA=300 EXP=2
+
+UPPER_WALLS ARG=d0 AT=2.2 KAPPA=300 EXP=2
+LOWER_WALLS ARG=d0 AT=1.5 KAPPA=300 EXP=2
+# prevent Ti-O from breaking
+UPPER_WALLS ARG=d0 AT=3.0 KAPPA=300 EXP=2
+# print CVs
+PRINT STRIDE=100 ARG=d0,cn,opes.* FILE=COLVAR

@@ -1,0 +1,50 @@
+# @package _global_
+# Trimmed copy of to_refactor/config/case/atio2-h2o.yaml used by tests/test_migrate.py.
+
+mplstyle:
+    dir: /users/someone/mplstyles
+    style: jcp.mplstyle
+
+dir_md: '.'
+dir_job: '00*'
+temp: 350
+
+cvs:
+    select: ['d0', 'cn']
+    add: null
+    cn:
+        limits: [0.75, null]
+        sigma: 0.033
+    d0:
+        limits: [1.5, 2.5]
+        sigma: 0.02161725
+        color: red
+    theta1:
+        limits: [1.0, 2.5]
+        scale: 57.29577951308232
+    direct-delta:
+        limits: &deltalimits [-1.5, 1.5]
+    indirect-delta:
+        limits: *deltalimits
+    rmse-f:
+        limits: [null, null]
+
+find_structures:
+    points: [[1.99, 1.33]]
+    save_structures:
+      type_map:
+        1: H
+        2: O
+        3: Ti
+
+proton_transfer:
+    indices_type1: 262
+    indices_type2: null
+    indices_water: &water [153, 154, 155]
+    surf_sites:
+        A:
+            indices_type2: 311
+        B:
+            indices_type2: [313, 218]
+        liquid:
+            indices_type2: *water

@@ -1,0 +1,24 @@
+# estk "slides" style: larger text and lines for presentations.
+
+figure.figsize: 6.4, 3.6
+figure.dpi: 150
+savefig.dpi: 300
+savefig.bbox: tight
+pdf.fonttype: 42
+
+font.size: 12
+axes.titlesize: 14
+axes.labelsize: 13
+axes.linewidth: 1.0
+lines.linewidth: 2.0
+lines.markersize: 6
+
+xtick.direction: in
+xtick.minor.visible: True
+xtick.labelsize: 11
+ytick.direction: in
+ytick.minor.visible: True
+ytick.labelsize: 11
+
+legend.frameon: False
+legend.fontsize: 11

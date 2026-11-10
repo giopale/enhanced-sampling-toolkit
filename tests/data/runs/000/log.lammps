@@ -1,0 +1,159 @@
+LAMMPS (12 Jun 2025)
+KOKKOS mode with Kokkos version 4.6.0 is enabled (src/KOKKOS/kokkos.cpp:72)
+  will use up to 1 GPU(s) per node
+WARNING: When using a single thread, the Kokkos Serial backend (i.e. Makefile.kokkos_mpi_only) gives better performance than the OpenMP backend (src/KOKKOS/kokkos.cpp:210)
+  using 1 OpenMP thread(s) per MPI task
+package kokkos
+package kokkos newton on neigh half
+variable    TAU_T            equal 0.1
+variable    TAU_P            equal 0.5
+variable    TIME_CONST       equal 0.1
+variable    TEMP             equal 350
+variable    PRES             equal -1
+variable    DATA_FILE        string "/capstor/scratch/cscs/pgiorgio/ai2-kit/atio2-h2o-charged-opes-1/structures/polaron/001254.lammps.data"
+variable    N_STEPS          equal 40000000
+variable    THERMO_FREQ      equal 100
+variable    DUMP_FREQ        equal 100
+variable    SAMPLE_FREQ      equal 100
+variable    DEFAULT_GROUP    string "all"
+variable    DUMP_GROUP       string "all"
+# >>>>> EXTRA_VARS
+
+# <<<<< EXTRA_VARS
+
+# >>>>> INITIALIZE
+units           metal
+atom_style      atomic
+boundary p p p
+# <<<<< INITIALIZE
+
+# >>>>> POST_INIT
+neighbor 2.0 bin
+box      tilt large
+
+The 'box' command has been removed and will be ignored
+
+
+# <<<<< POST_INIT
+
+# >>>>> READ_DATA
+if "${restart} > 0" then "read_restart md.restart" else "read_data ${DATA_FILE} extra/atom/types 0"
+read_data ${DATA_FILE} extra/atom/types 0
+read_data /capstor/scratch/cscs/pgiorgio/ai2-kit/atio2-h2o-charged-opes-1/structures/polaron/001254.lammps.data extra/atom/types 0
+Reading data file ...
+  orthogonal box = (0 0 0) to (10.39 11.41 35)
+  reading atoms ...
+  read_data CPU = 0.004 seconds
+# <<<<< READ_DATA
+
+# >>>>> MASS_MAP
+variable    H                equal 1
+variable    O                equal 2
+variable    Ti               equal 3
+
+mass ${H} 1.00784
+mass 1 1.00784
+mass ${O} 15.999
+mass 2 15.999
+mass ${Ti} 47.867
+mass 3 47.867
+# <<<<< MASS_MAP
+
+
+# >>>>> POST_READ_DATA
+
+# <<<<< POST_READ_DATA
+
+# >>>>> SET_ATOM_TYPE
+
+# <<<<< SET_ATOM_TYPE
+
+# >>>>> GROUPS
+
+# <<<<< GROUPS
+
+pair_style      mliap unified /capstor/scratch/cscs/pgiorgio/ai2-kit/000-work//mace-atio2-h2o-neutral-opes/iters-010/train_mace/tasks/000/mace_model.model-mliap_lammps.pt 0
+pair_coeff      * * H O Ti
+
+#### pair_coeff * *
+# >>>>> POST_FORCE_FIELD
+
+# <<<<< POST_FORCE_FIELD
+
+if "${restart} == 0" then "velocity ${DEFAULT_GROUP} create ${TEMP} 3"
+velocity ${DEFAULT_GROUP} create ${TEMP} 3
+velocity all create ${TEMP} 3
+velocity all create 350 3
+fix 1 ${DEFAULT_GROUP} nvt temp ${TEMP} ${TEMP} ${TAU_T}
+fix 1 all nvt temp ${TEMP} ${TEMP} ${TAU_T}
+fix 1 all nvt temp 350 ${TEMP} ${TAU_T}
+fix 1 all nvt temp 350 350 ${TAU_T}
+fix 1 all nvt temp 350 350 0.1
+timestep 0.000500
+fix cll_plumed ${DEFAULT_GROUP} plumed plumedfile plumed.plumed outfile plumed.out
+fix cll_plumed all plumed plumedfile plumed.plumed outfile plumed.out
+thermo_style custom step temp pe ke etotal press vol lx ly lz xy xz yz
+thermo       ${THERMO_FREQ}
+thermo       100
+dump alpha ${DUMP_GROUP} custom ${DUMP_FREQ} traj.lammpstrj id type element x y z fx fy fz
+dump alpha all custom ${DUMP_FREQ} traj.lammpstrj id type element x y z fx fy fz
+dump alpha all custom 100 traj.lammpstrj id type element x y z fx fy fz
+####dump bravo ${DUMP_GROUP} h5md ${DUMP_FREQ} dump.h5.${LAMMPS_H5_SUFFIX} position species
+
+restart 100 md.restart md.restart
+
+# >>>>> POST_SIMULATION
+
+# <<<<< POST_SIMULATION
+
+timer timeout ${LAMMPS_MAX_TIME} every 100
+timer timeout 23:56:00 every 100
+New timer settings: style=normal  mode=nosync  timeout=23:56:00
+run      ${N_STEPS} upto
+run      40000000 upto
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8
+  ghost atom cutoff = 8
+  binsize = 8, bins = 2 2 5
+  (1) pair mliap/kk, perpetual
+      attributes: full, newton on, kokkos_device
+      pair build: full/bin/kk/device
+      stencil: full/bin/3d
+      bin: kk/device
+Per MPI rank memory allocation (min/avg/max) = 62.53 | 62.53 | 62.53 Mbytes
+   Step          Temp          PotEng         KinEng         TotEng         Press          Volume           Lx             Ly             Lz             Xy             Xz             Yz      
+WARNING: Wall time limit reached (src/timer.cpp:201)
+Loop time of 86136.5 on 1 procs for 2120400 steps with 408 atoms
+
+Performance: 1.063 ns/day, 22.568 hours/ns, 24.617 timesteps/s, 10.044 katom-step/s
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 84917      | 84917      | 84917      |   0.0 | 98.58
+Neigh   | 17.838     | 17.838     | 17.838     |   0.0 |  0.02
+Comm    | 85.907     | 85.907     | 85.907     |   0.0 |  0.10
+Output  | 80.383     | 80.383     | 80.383     |   0.0 |  0.09
+Modify  | 966.2      | 966.2      | 966.2      |   0.0 |  1.12
+Other   |            | 69.02      |            |       |  0.08
+
+Nlocal:            408 ave         408 max         408 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:           3097 ave        3097 max        3097 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:              0 ave           0 max           0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+FullNghs:        86682 ave       86682 max       86682 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 86682
+Ave neighs/atom = 212.45588
+Neighbor list builds = 44088
+Dangerous builds = 0
+
+# >>>>> POST_RUN
+
+# <<<<< POST_RUN
+Total wall time: 23:56:22

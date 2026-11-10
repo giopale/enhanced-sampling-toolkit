@@ -1,0 +1,84 @@
+variable    TAU_T            equal 0.1
+variable    TAU_P            equal 0.5
+variable    TIME_CONST       equal 0.1
+variable    TEMP             equal 350
+variable    PRES             equal -1
+variable    DATA_FILE        string "/capstor/scratch/cscs/pgiorgio/ai2-kit/atio2-h2o-charged-opes-1/structures/polaron/001254.lammps.data"
+variable    N_STEPS          equal 40000000
+variable    THERMO_FREQ      equal 100
+variable    DUMP_FREQ        equal 100
+variable    SAMPLE_FREQ      equal 100
+variable    DEFAULT_GROUP    string "all"
+variable    DUMP_GROUP       string "all"
+# >>>>> EXTRA_VARS
+
+# <<<<< EXTRA_VARS
+
+# >>>>> INITIALIZE
+units           metal
+atom_style      atomic
+boundary p p p
+# <<<<< INITIALIZE
+
+# >>>>> POST_INIT
+neighbor 2.0 bin
+box      tilt large
+
+# <<<<< POST_INIT
+
+# >>>>> READ_DATA
+if "${restart} > 0" then "read_restart md.restart" else "read_data ${DATA_FILE} extra/atom/types 0"
+# <<<<< READ_DATA
+
+# >>>>> MASS_MAP
+variable    H                equal 1
+variable    O                equal 2
+variable    Ti               equal 3
+
+mass ${H} 1.00784
+mass ${O} 15.999
+mass ${Ti} 47.867
+# <<<<< MASS_MAP
+
+
+# >>>>> POST_READ_DATA
+
+# <<<<< POST_READ_DATA
+
+# >>>>> SET_ATOM_TYPE
+
+# <<<<< SET_ATOM_TYPE
+
+# >>>>> GROUPS
+
+# <<<<< GROUPS
+
+pair_style      mliap unified /capstor/scratch/cscs/pgiorgio/ai2-kit/000-work//mace-atio2-h2o-neutral-opes/iters-010/train_mace/tasks/001/mace_model.model-mliap_lammps.pt 0
+pair_coeff      * * H O Ti
+
+#### pair_coeff * *
+# >>>>> POST_FORCE_FIELD
+
+# <<<<< POST_FORCE_FIELD
+
+if "${restart} == 0" then "velocity ${DEFAULT_GROUP} create ${TEMP} 3"
+fix 1 ${DEFAULT_GROUP} nvt temp ${TEMP} ${TEMP} ${TAU_T}
+timestep 0.000500
+fix cll_plumed ${DEFAULT_GROUP} plumed plumedfile plumed.plumed outfile plumed.out
+thermo_style custom step temp pe ke etotal press vol lx ly lz xy xz yz
+thermo       ${THERMO_FREQ}
+dump alpha ${DUMP_GROUP} custom ${DUMP_FREQ} traj.lammpstrj id type element x y z fx fy fz
+####dump bravo ${DUMP_GROUP} h5md ${DUMP_FREQ} dump.h5.${LAMMPS_H5_SUFFIX} position species
+
+restart 100 md.restart md.restart
+
+# >>>>> POST_SIMULATION
+
+# <<<<< POST_SIMULATION
+
+timer timeout ${LAMMPS_MAX_TIME} every 100
+run      ${N_STEPS} upto
+
+# >>>>> POST_RUN
+
+# <<<<< POST_RUN

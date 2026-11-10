@@ -1,2 +1,111 @@
 # enhanced-sampling-toolkit
-Tools for handling MD+enhanced sampling simulations
+
+Tools for analysing MD + enhanced sampling simulations (LAMMPS + PLUMED/OPES): reweighting to
+free-energy surfaces, minimum-energy paths, barrier convergence and structure extraction.
+
+The toolkit is being rebuilt from the scripts in `to_refactor/`; see [REFACTOR.md](REFACTOR.md)
+for the plan and the status of each part. At this stage the configuration, reading the simulation
+settings, loading CV data, bandwidth selection, reweighting, combining runs, minimum energy
+paths, figures, barrier convergence and the OPES / model-deviation checks are in place.
+
+## Install
+
+```bash
+pip install -e '.[dev]'      # from a clone of this repository
+```
+
+This installs the `estk` command and the `estk` Python package.
+
+## Quick start
+
+A step-by-step guide with example output and figures is in
+[docs/quickstart.md](docs/quickstart.md). In short:
+
+In the folder that contains your run folders (`000/`, `001/`, ...; a folder can also hold the
+walkers of one multi-walker simulation, `COLVAR.0`, `COLVAR.1`, ...):
+
+```bash
+estk init --pattern '00*'    # writes estk.yaml, with an entry for each CV found in COLVAR
+estk config show             # settings in effect and where each one comes from
+estk config validate         # check estk.yaml after editing it
+estk runs                    # temperature, timestep, bias, walls... read for each run
+estk cvs d0 cn --time 0 20   # rows kept, CV ranges and frames past walls, per run
+estk bandwidth d0 cn         # Silverman and SCV bandwidths per run; --save writes them
+estk reweight d0 cn -j 4     # per-run surfaces + all runs combined -> reweight-d0-cn/
+estk reweight d0 cn --bandwidth scv   # bandwidths by smoothed cross-validation instead
+estk reweight d0 cn --blocks 4        # error bars from time blocks (e.g. one multi-walker run)
+estk reweight d0             # 1D profile
+estk combine reweight-d0-cn/0*.dat -m equal -o equal.dat   # recombine with another mode
+estk mep reweight-d0-cn/combined.dat   # minimum energy path and barriers (+ each run's)
+estk info reweight-d0-cn/combined.dat  # grid, units and how a surface or path was made
+estk cv compute driver.plumed -j 16 --save    # CVs of a PLUMED input, from the dumps
+estk cv proton-transfer --kind direct --donor pt_type1 --acceptor site_A --save
+estk along-path reweight-d0-cn/combined.mep.dat dOOliq.min theta1   # other CVs along the path
+estk plot surface reweight-d0-cn/combined.dat --path reweight-d0-cn/combined.mep.dat
+estk plot surface reweight-d0-cn/*.dat       # all runs side by side
+estk plot path reweight-d0-cn/combined.mep.dat -o profile.pdf
+estk convergence time d0 cn --until 20 --step 1          # barrier vs time
+estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08  # vs bandwidth
+estk check opes                                # c(t), zed, neff, nker of each run
+estk check model-deviation --levels 0.2,0.35   # ML potential trust levels
+```
+
+Paths start, and barriers are measured, from the minimum nearest `reaction.start` in `estk.yaml`
+(e.g. `reaction: {start: {cn: 2.0}}`); without it, from the minimum with the smaller first CV.
+Axis labels come from `estk.yaml` (`cv.d0.label: "d(Ti–O)"`, `cv.d0.units: Å`). Figures use the
+`paper` style (single-column journal figures); `--style slides` or your own `.mplstyle` file
+change it.
+
+Surfaces and paths are text files (PLUMED grid layout) whose header records how they were made:
+temperature, bandwidths, time range, runs and weights, estk version and the command.
+`--compress` (or any output name ending in `.gz`) writes them gzip-compressed.
+
+From Python:
+
+```python
+from estk import Project
+
+project = Project()                      # uses the nearest estk.yaml
+tables = project.load_cvs(["d0", "cn"], time=(0, 20))
+tables[0]["d0"], tables[0].bias, tables[0].kbt
+
+result = project.reweight(["d0", "cn"], time=(0, 20))
+fes = result.surfaces["000"]           # .grid, .values (kJ/mol, min 0), .metadata
+both = result.combined                 # all runs; .error = spread between runs
+
+from estk.paths import minimum_energy_path
+path = minimum_energy_path(both)       # .points, .energies, .barrier, .reverse_barrier
+path.save("combined.mep.dat")
+
+import estk
+fes = estk.load("reweight-d0-cn/combined.dat")   # a Surface, or a path for a .mep.dat file
+
+from estk.plotting import plot_style, plot_surface, plot_path_profile
+with plot_style("paper"):
+    ax = plot_surface(both, path=path, units="eV")   # returns the matplotlib Axes
+```
+
+Coming from the old Hydra configuration:
+
+```bash
+estk config migrate to_refactor/config/case/atio2-h2o.yaml -o estk.yaml
+```
+
+This keeps the facts about the system (CV limits and bandwidths, atom types, atom groups) and
+lists the settings it left out.
+
+## How this was made
+
+The rewrite of the original analysis scripts (`to_refactor/`) into the `estk` package (its
+design, code, tests and documentation) was done with Claude, Anthropic's AI assistant, through
+Claude Code, under the direction of Giorgio Palermo, who set the goals and the scientific
+choices, reviewed each step and checked the results on the simulations the toolkit is for. The
+plan, and the record of each decision and of what was checked against the original code, is in
+[REFACTOR.md](REFACTOR.md).
+
+## Development
+
+```bash
+pytest
+ruff check . && ruff format --check .
+```
