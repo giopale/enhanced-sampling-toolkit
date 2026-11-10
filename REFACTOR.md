@@ -1,7 +1,9 @@
 # Refactor plan
 
 This document tracks the refactor of the code in `to_refactor/` into an installable,
-documented toolkit. There is one section per functionality, each with:
+documented toolkit. The refactoring was done with Claude (Anthropic's AI assistant, through
+Claude Code), directed and reviewed by Giorgio Palermo. There is one section per functionality,
+each with:
 
 - **Current state**: what the code does today and where it lives
 - **Problems**: what makes it hard to use, maintain or trust

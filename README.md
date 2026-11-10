@@ -94,6 +94,15 @@ estk config migrate to_refactor/config/case/atio2-h2o.yaml -o estk.yaml
 This keeps the facts about the system (CV limits and bandwidths, atom types, atom groups) and
 lists the settings it left out.
 
+## How this was made
+
+The rewrite of the original analysis scripts (`to_refactor/`) into the `estk` package (its
+design, code, tests and documentation) was done with Claude, Anthropic's AI assistant, through
+Claude Code, under the direction of Giorgio Palermo, who set the goals and the scientific
+choices, reviewed each step and checked the results on the simulations the toolkit is for. The
+plan, and the record of each decision and of what was checked against the original code, is in
+[REFACTOR.md](REFACTOR.md).
+
 ## Development
 
 ```bash
