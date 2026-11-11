@@ -179,7 +179,7 @@ def barrier_convergence(
             n: (lo, hi) for n, lo, hi in zip(grid.names, grid.lower, grid.upper, strict=True)
         },
     }
-    step_options = {**options, **fixed_grid}
+    step_options = {**options, **fixed_grid, "warn_spacing": False}
     if path is None:
         reaction = project.config.reaction
         hints = {"start_near": reaction.start or None, "end_near": reaction.end or None}
@@ -237,6 +237,15 @@ def barrier_convergence(
             combined.save(folder / f"{parameter}-{value:g}.dat")
             step_path.save(folder / f"{parameter}-{value:g}.mep.dat")
 
+    if parameter == "bandwidth":
+        spacing = grid.spacing[cv]  # type: ignore[index]
+        below = [v for v in values if v < spacing]
+        if below:
+            log.warning(
+                "%d of the bandwidths of %s (%g to %g) are below the grid spacing %.3g: there "
+                "the barrier depends on the grid; use more points to trust them",
+                len(below), cv, min(below), max(below), spacing,
+            )  # fmt: skip
     units = reference.combined.units
     meta: dict[str, Any] = {
         "cvs": cvs,
@@ -248,5 +257,6 @@ def barrier_convergence(
         meta["start_ns"] = start
     else:
         meta["cv"] = cv
+        meta["grid_spacing"] = grid.spacing[cv]  # type: ignore[index]
         meta["time_window_ns"] = list(time) if time else None
     return ConvergenceResult(parameter, label, rows, units=units, path=path, metadata=meta)

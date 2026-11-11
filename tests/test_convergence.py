@@ -61,11 +61,15 @@ def test_relaxed_time_scan_and_start(project):
                             reweight_options=OPTIONS)  # fmt: skip
 
 
-def test_bandwidth_scan(project, tmp_path):
+def test_bandwidth_scan(project, tmp_path, caplog):
     result = barrier_convergence(
         project, ["d0", "cn"], "bandwidth", [0.01, 0.02, 0.05], cv="d0",
         reweight_options=OPTIONS, save_steps=tmp_path / "steps",
     )  # fmt: skip
+    # d0 spacing (2.5 - 1.5) / 20 = 0.05: one warning for the scan, not one per step
+    assert result.metadata["grid_spacing"] == pytest.approx(0.05)
+    scan = [r.message for r in caplog.records if "below the grid spacing" in r.message]
+    assert len(scan) == 1 and "2 of the bandwidths of d0" in scan[0]
     assert result.label == "bandwidth of d0"
     barriers = result.column("barrier")
     assert len(set(np.round(barriers, 6))) == 3  # the bandwidth changes the barrier
@@ -81,6 +85,12 @@ def test_bandwidth_scan(project, tmp_path):
     assert back.rows[0].run_barriers.keys() == result.rows[0].run_barriers.keys()
     ax = plot_convergence(back, units="kT")
     assert ax.get_ylabel() == "energy (kT)"
+    dashed = [line for line in ax.get_lines() if line.get_linestyle() == "--"]
+    assert len(dashed) == 1 and dashed[0].get_xdata()[0] == pytest.approx(0.05)
+    assert "grid spacing" in [t.get_text() for t in ax.get_legend().get_texts()]
+    above = ConvergenceResult(back.parameter, back.label, back.rows[2:], metadata=back.metadata)
+    ax = plot_convergence(above)  # the scan stays above the spacing: no line
+    assert not [line for line in ax.get_lines() if line.get_linestyle() == "--"]
 
 
 def test_convergence_commands(project, tmp_path, monkeypatch):

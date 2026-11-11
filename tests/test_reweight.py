@@ -147,6 +147,7 @@ def test_grid():
     assert grid.shape == (3, 2)
     np.testing.assert_allclose(grid.axes()[0], [0, 0.5, 1])
     assert grid.coordinates()[:2].tolist() == [[0.0, 1.0], [0.0, 3.0]]
+    assert grid.spacing == {"a": 0.5, "b": 2.0}
     with pytest.raises(EstError, match="below"):
         Grid(("a",), (1.0,), (0.0,), (3,))
 
@@ -278,6 +279,22 @@ def test_silverman_used_without_bandwidth(biased_project):
     meta = Project(config).reweight(["d0", "cn"], points=5).surfaces["000"].metadata
     assert meta["bandwidth_source"]["cn"] == "silverman"
     assert 0 < meta["bandwidth"]["cn"] < 0.5
+
+
+def test_warning_when_bandwidth_below_grid_spacing(biased_project, caplog):
+    result = biased_project.reweight(["d0", "cn"], points=5, bandwidth={"d0": 0.05})
+    spacing = result.grid.spacing
+    messages = [r.message for r in caplog.records if "grid spacing" in r.message]
+    used = result.surfaces["000"].metadata["bandwidth"]
+    narrow = [n for n in ("d0", "cn") if used[n] < spacing[n]]
+    assert narrow and len(messages) == len(narrow)
+    assert all(f"bandwidth of {n} " in m for n, m in zip(narrow, messages, strict=True))
+    caplog.clear()
+    biased_project.reweight(["d0", "cn"], points=5, bandwidth={"d0": 0.05}, warn_spacing=False)
+    assert not [r for r in caplog.records if "grid spacing" in r.message]
+    wide = {n: 2 * spacing[n] for n in ("d0", "cn")}
+    biased_project.reweight(["d0", "cn"], points=5, bandwidth=wide)
+    assert not [r for r in caplog.records if "grid spacing" in r.message]
 
 
 def test_parallel_gives_same_result(biased_project):

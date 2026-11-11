@@ -45,6 +45,14 @@ class Grid:
     def shape(self) -> tuple[int, ...]:
         return tuple(self.points)
 
+    @property
+    def spacing(self) -> dict[str, float]:
+        """Distance between neighbouring grid points along each CV."""
+        return {
+            n: (hi - lo) / (p - 1)
+            for n, lo, hi, p in zip(self.names, self.lower, self.upper, self.points, strict=True)
+        }
+
     def axes(self) -> list[np.ndarray]:
         return [
             np.linspace(lo, hi, p)

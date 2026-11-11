@@ -411,6 +411,12 @@ Against the bandwidth of one CV:
 estk convergence bandwidth d0 cn --cv d0 --range 0.005 0.08 --num 10
 ```
 
+The grid stays the same for every step. Bandwidths smaller than the grid spacing undersample the
+surface, so the barrier there depends on the grid rather than the data. estk warns about them,
+and the plot marks the spacing with a dashed vertical line. To trust the small-bandwidth end,
+raise `--points` until the spacing is at most half the smallest bandwidth (the warning gives the
+number of points).
+
 ## 9. From Python
 
 Everything the commands do is available as functions returning objects:

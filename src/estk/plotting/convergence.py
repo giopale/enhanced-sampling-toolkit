@@ -13,7 +13,9 @@ def plot_convergence(result: object, ax: Axes | None = None, *, units: str | Non
     """Barrier, reverse barrier and reaction free energy against time or bandwidth.
 
     The band around the barrier is the spread (standard deviation) of the runs' barriers.
-    Bandwidth scans spanning a factor 8 or more use a logarithmic x axis.
+    Bandwidth scans spanning a factor 8 or more use a logarithmic x axis. When a bandwidth scan
+    goes below the grid spacing of its CV, a dashed vertical line marks the spacing: to its left
+    the surface is undersampled and the barrier depends on the grid.
     """
     import matplotlib.pyplot as plt
 
@@ -41,6 +43,9 @@ def plot_convergence(result: object, ax: Axes | None = None, *, units: str | Non
         )  # fmt: skip
         label_text.set_path_effects([patheffects.withStroke(linewidth=1.2, foreground="white")])
     ax.axhline(0.0, color=INK_MUTED, lw=0.4, zorder=0)
+    spacing = result.metadata.get("grid_spacing")  # type: ignore[attr-defined]
+    if result.parameter == "bandwidth" and spacing and x.min() < spacing:  # type: ignore[attr-defined]
+        ax.axvline(spacing, color=INK_MUTED, lw=0.8, ls="--", zorder=0, label="grid spacing")
     log_x = result.parameter == "bandwidth" and x.min() > 0 and x.max() / x.min() >= 8  # type: ignore[attr-defined]
     if log_x:
         ax.set_xscale("log")

@@ -208,6 +208,7 @@ def reweight(
     skip_failed: bool = False,
     combine: str | None = "equal",
     blocks: int = 1,
+    warn_spacing: bool = True,
 ) -> ReweightResult:
     """Reweight every run of ``project`` onto one grid, and combine the runs.
 
@@ -244,6 +245,9 @@ def reweight(
         each: the spread between them estimates the error of a single simulation, e.g. of
         walkers that share a bias, whose spread is no error bar. The ``probability``
         combination of the blocks is the surface of the whole run.
+    warn_spacing:
+        Log a warning when a bandwidth is smaller than the grid spacing of its CV (see
+        ``coarse_grid_messages``).
     """
     if blocks < 1:
         raise EstError(f"blocks must be at least 1, got {blocks}")
@@ -336,6 +340,9 @@ def reweight(
             raise error
     if not surfaces:
         raise EstError("reweighting failed for every run")
+    if warn_spacing:
+        for message in coarse_grid_messages(grid, surfaces):
+            log.warning(message)
     combined = combine_surfaces(surfaces, mode=combine) if combine else None
     return ReweightResult(
         grid=grid,
@@ -345,6 +352,32 @@ def reweight(
         tables=tables,
         combined=combined,
     )
+
+
+def coarse_grid_messages(grid: Grid, surfaces: Mapping[str, Surface]) -> list[str]:
+    """One message per CV whose bandwidth is smaller than the grid spacing in some run.
+
+    The kernel estimate is exact at the grid points, but kernels narrower than a cell leave the
+    surface undersampled between them: spiky, dependent on where the points fall, and cut off at
+    the top of barriers by the linear interpolation along paths. A spacing of half the bandwidth
+    or less is safe.
+    """
+    spacing = grid.spacing
+    messages = []
+    for k, name in enumerate(grid.names):
+        found = {run: s.metadata.get("bandwidth", {}).get(name) for run, s in surfaces.items()}
+        narrow = {run: h for run, h in found.items() if h is not None and h < spacing[name]}
+        if not narrow:
+            continue
+        smallest = min(narrow.values())
+        runs = ", ".join(sorted(narrow)) if len(narrow) <= 3 else f"{len(narrow)} runs"
+        needed = int(np.ceil((grid.upper[k] - grid.lower[k]) / (smallest / 2))) + 1
+        messages.append(
+            f"bandwidth of {name} ({smallest:.3g}, {runs}) is smaller than the grid spacing "
+            f"{spacing[name]:.3g}: the surface is undersampled between grid points; "
+            f"use about {needed} points along {name} (spacing h/2)"
+        )
+    return messages
 
 
 def _reweight_job(args: dict[str, Any]) -> Surface:
