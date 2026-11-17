@@ -1066,7 +1066,8 @@ def cv_compute(
     ] = False,
 ) -> None:
     """Compute the CVs printed by a PLUMED input on every frame of each run's dump, without
-    PLUMED (DISTANCE, DISTANCES with MIN/MAX). Times are step x timestep, as in COLVAR."""
+    PLUMED (DISTANCE, DISTANCES with MIN/MAX, COORDINATION). Times are step x timestep, as in
+    COLVAR."""
     from estk.config import set_cv_values
     from estk.cv import CVProgram, compute_cvs
     from estk.project import Project

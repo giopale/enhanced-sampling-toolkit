@@ -154,10 +154,101 @@ def test_builtin_cvs_match_brute_force(tmp_path):
     assert nm.evaluate(r[[0, 11]], box)["d"] == pytest.approx(np.linalg.norm(r[11] - r[0]) / 10)
 
 
+def plumed_switch(r, r0, nn=6, mm=0, d0=0.0, dmax=None, stretch=True):
+    """PLUMED's rational switching function, written out one distance at a time."""
+    mm = mm or 2 * nn
+    if dmax is None:
+        dmax = d0 + r0 * 0.00001 ** (1.0 / (nn - mm))
+
+    def raw(d):
+        x = max(d - d0, 0.0) / r0
+        if abs(x - 1) < 1e-9:
+            return nn / mm
+        return (1 - x**nn) / (1 - x**mm)
+
+    if r > dmax:
+        return 0.0
+    if not stretch or dmax == np.inf:
+        return raw(r)
+    return (raw(r) - raw(dmax)) / (raw(0.0) - raw(dmax))
+
+
+def brute_coordination(r, a, b, box_lengths, **switch):
+    """a, b: 0-based rows of r; b None: the pairs within a."""
+    pairs = [(i, j) for k, i in enumerate(a) for j in a[k + 1:]] if b is None else \
+        [(i, j) for i in a for j in b if i != j]  # fmt: skip
+    total = 0.0
+    for i, j in pairs:
+        d = np.linalg.norm(brute_min_image(r[i], r[j][None, :])[0])
+        total += plumed_switch(d, **switch)
+    return total
+
+
+COORD = """UNITS LENGTH=A
+ox: GROUP ATOMS=1-4
+hy: GROUP ATOMS=5-12
+cn: COORDINATION GROUPA=ox GROUPB=hy R_0=3.0 NN=24 MM=0
+self: COORDINATION GROUPA=ox R_0=4.0
+general: COORDINATION GROUPA=ox GROUPB=hy SWITCH={RATIONAL R_0=2.5 NN=6 MM=10 D_0=0.5 D_MAX=6}
+plain: COORDINATION GROUPA=ox GROUPB=hy SWITCH={RATIONAL R_0=2.5 NN=8 NOSTRETCH D_MAX=5}
+paired: COORDINATION GROUPA=1,2 GROUPB=5,6 PAIR R_0=3.5
+overlap: COORDINATION GROUPA=1-6 GROUPB=5-8 R_0=3.0
+PRINT ARG=cn,self,general,plain,paired,overlap FILE=x
+"""
+
+
+def test_coordination_matches_plumed_formula(tmp_path):
+    (tmp_path / "c.plumed").write_text(COORD)
+    program = CVProgram.from_plumed(tmp_path / "c.plumed")
+    box = Box(lo=np.zeros(3), matrix=np.diag(L))
+    ox, hy = list(range(4)), list(range(4, 12))
+    for step in range(5):
+        r = positions(step)
+        values = program.evaluate(r, box)
+        expected = {
+            "cn": brute_coordination(r, ox, hy, L, r0=3.0, nn=24),
+            "self": brute_coordination(r, ox, None, L, r0=4.0),
+            "general": brute_coordination(r, ox, hy, L, r0=2.5, nn=6, mm=10, d0=0.5, dmax=6.0),
+            "plain": brute_coordination(r, ox, hy, L, r0=2.5, nn=8, dmax=5.0, stretch=False),
+            "overlap": brute_coordination(r, list(range(6)), [4, 5, 6, 7], L, r0=3.0),
+        }
+        pair_d = [
+            np.linalg.norm(brute_min_image(r[i], r[j][None, :])[0]) for i, j in ((0, 4), (1, 5))
+        ]
+        expected["paired"] = sum(plumed_switch(d, r0=3.5) for d in pair_d)
+        for name, value in expected.items():
+            assert values[name] == pytest.approx(value, rel=1e-10, abs=1e-12), name
+        assert values["cn"] > 0.01  # the test has pairs within reach
+
+
+def test_coordination_by_hand(tmp_path):
+    """One O-H pair at r: 1/(1+(r/r0)^24) stretched to 0 at d_max = r0 * 1e5^(1/24)."""
+    (tmp_path / "c.plumed").write_text(
+        "c: COORDINATION GROUPA=1 GROUPB=2 R_0=1.2 NN=24 MM=0\nUNITS LENGTH=A\nPRINT ARG=c FILE=x\n"
+    )
+    program = CVProgram.from_plumed(tmp_path / "c.plumed")
+    box = Box(lo=np.zeros(3), matrix=np.diag(L))
+    dmax = 1.2 * 1e5 ** (1 / 24)
+    sd = 1 / (1 + (dmax / 1.2) ** 24)
+    for r, raw in [(0.97, 1 / (1 + (0.97 / 1.2) ** 24)), (1.2, 0.5), (1.2 + 1e-7, None),
+                   (dmax + 0.01, None)]:  # fmt: skip
+        value = program.evaluate(np.array([[1.0, 1.0, 1.0], [1.0 + r, 1.0, 1.0]]), box)["c"]
+        if raw is not None:
+            assert value == pytest.approx((raw - sd) / (1 - sd), rel=1e-12)
+        elif r > dmax:
+            assert value == 0.0
+        else:  # continuous through x = 1
+            assert value == pytest.approx((0.5 - sd) / (1 - sd), abs=1e-5)
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [("d: DISTANCES GROUPA=1 GROUPB=2,3\nPRINT ARG=d FILE=x\n", "MIN"),
-     ("c: COORDINATION GROUPA=1 GROUPB=2\nPRINT ARG=c FILE=x\n", "not computed"),
+     ("t: TORSION ATOMS=1,2,3,4\nPRINT ARG=t FILE=x\n", "not computed"),
+     ("c: COORDINATION GROUPA=1 GROUPB=2\nPRINT ARG=c FILE=x\n", "R_0"),
+     ("c: COORDINATION GROUPA=1 GROUPB=2 SWITCH={EXP R_0=1}\nPRINT ARG=c FILE=x\n", "RATIONAL"),
+     ("c: COORDINATION GROUPA=1,2 GROUPB=3 PAIR R_0=1\nPRINT ARG=c FILE=x\n", "same length"),
+     ("c: COORDINATION GROUPA=1 GROUPB=2 R_0=1 NN=6 MM=6\nPRINT ARG=c FILE=x\n", "NN != MM"),
      ("PRINT ARG=nothing FILE=x\n", "no action defines"),
      ("d: DISTANCE ATOMS=1,2\n", "no PRINT"),
      ("d: DISTANCE ATOMS=1,2,3\nPRINT ARG=d FILE=x\n", "two atoms"),

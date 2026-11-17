@@ -323,9 +323,13 @@ estk along-path reweight-d0-cn/combined.mep.dat dOOliq.min dOO2c.min
   `cv_analysis/CV`, or `cv_analysis/CV.<i>` per walker, in the run folder.
 - **Using the files.** `--save` points `cv.<name>.source` in `estk.yaml` at them, so every
   command can use the new CVs.
-- **What's supported, without PLUMED:** `GROUP`, `DISTANCE`, and `DISTANCES` with
-  `MIN={BETA=...}` or `MAX={BETA=...}`. These use PLUMED's formulas and the minimum image.
-  Other actions in the file are ignored unless a printed value needs them.
+- **What's supported, without PLUMED:** `GROUP`, `DISTANCE`, `DISTANCES` with
+  `MIN={BETA=...}` or `MAX={BETA=...}`, and `COORDINATION` with the rational switching
+  function (`R_0= NN= MM= D_0=` or `SWITCH={RATIONAL ...}`, with `GROUPB`, without it for the
+  pairs within `GROUPA`, or with `PAIR`). For example:
+  `cnO2c: COORDINATION GROUPA=O2c GROUPB=hydrogens R_0=1.2 NN=24 MM=0`. These use PLUMED's
+  formulas, including its cut-off and stretching of the switching function, and the minimum
+  image. Other actions in the file are ignored unless a printed value needs them.
 - **Times.** The time of a frame is its step number from the dump times the timestep, so the
   values line up with COLVAR, even where a restart wrote some steps twice.
 - **Which dumps work.** Any `dump custom` with an `id` column and coordinates (`x y z`,

@@ -1,10 +1,21 @@
 """CVs from a PLUMED input, computed in numpy (no PLUMED needed).
 
 Supported: ``UNITS`` (LENGTH), ``GROUP ATOMS=...``, ``DISTANCE ATOMS=a,b``, ``DISTANCES
-GROUPA=... GROUPB=...`` with ``MIN={BETA=b}`` or ``MAX={BETA=b}``, and ``PRINT ARG=... FILE=...
-STRIDE=...``. Distances use the minimum image (``NOPBC`` to switch it off). The smooth minimum
-and maximum are PLUMED's: ``b / log(sum_i exp(b / r_i))`` and ``b log(sum_i exp(r_i / b))``.
-Other actions are ignored unless a printed value needs them.
+GROUPA=... GROUPB=...`` with ``MIN={BETA=b}`` or ``MAX={BETA=b}``, ``COORDINATION`` (below), and
+``PRINT ARG=... FILE=... STRIDE=...``. Distances use the minimum image (``NOPBC`` to switch it
+off). The smooth minimum and maximum are PLUMED's: ``b / log(sum_i exp(b / r_i))`` and
+``b log(sum_i exp(r_i / b))``. Other actions are ignored unless a printed value needs them.
+
+``COORDINATION GROUPA=... [GROUPB=...] [PAIR]`` is PLUMED's: the sum over pairs of the rational
+switching function ``s(r) = (1 - x^n) / (1 - x^m)``, ``x = (r - D_0) / R_0`` (1 for r < D_0).
+The pairs are every A atom with every B atom (the same atom twice is skipped), the pairs within
+A when there is no GROUPB, or A[i] with B[i] with ``PAIR``. The switching function is given as
+``R_0= NN= MM= D_0=`` (NN default 6, MM default 2 NN, D_0 default 0) or as
+``SWITCH={RATIONAL R_0= NN= MM= D_0= D_MAX=}``. As in PLUMED (checked against its source,
+2.5 to 2.9), the function is cut at d_max and stretched, ``(s(r) - s(d_max)) / (s(0) -
+s(d_max))``, so that it goes smoothly to 0 there: d_max is ``D_0 + R_0 * 1e-5^(1/(NN-MM))``
+(where s is about 1e-5) for the first form, D_MAX for the second (no cut without D_MAX; no
+stretch with NOSTRETCH).
 
 Atom numbers are PLUMED's serial numbers, which ``fix plumed`` takes from the LAMMPS atom ids.
 """
@@ -42,10 +53,75 @@ class _Distance:
 
 
 @dataclass
+class _Rational:
+    """PLUMED's rational switching function, in PLUMED length units."""
+
+    r0: float
+    nn: int = 6
+    mm: int = 0  # 0: 2 nn
+    d0: float = 0.0
+    dmax: float = np.inf
+    stretch: bool = False
+
+    def __post_init__(self) -> None:
+        if self.mm == 0:
+            self.mm = 2 * self.nn
+        if self.r0 <= 0 or self.nn <= 0 or self.mm <= 0 or self.nn == self.mm:
+            raise EstError(f"switching function: need R_0 > 0 and NN != MM > 0, got {self}")
+
+    def raw(self, r: np.ndarray) -> np.ndarray:
+        x = np.clip((np.asarray(r, dtype=float) - self.d0) / self.r0, 0.0, None)
+        n, m = self.nn, self.mm
+        out = np.empty_like(x)
+        near = np.abs(x - 1.0) < 5e10 * np.finfo(float).eps  # 0/0 at x = 1: PLUMED's expansion
+        dx = x[near] - 1.0
+        second = n * (m * m - 3.0 * m * (n - 1) + n * (2 * n - 3)) / (6.0 * m)
+        out[near] = n / m + dx * (0.5 * n * (n - m) / m + 0.5 * dx * second)
+        low = (x < 1.0) & ~near
+        out[low] = (1.0 - x[low] ** n) / (1.0 - x[low] ** m)
+        high = (x > 1.0) & ~near  # in 1/x, which can't overflow
+        y = 1.0 / x[high]
+        out[high] = y ** (m - n) * (1.0 - y**n) / (1.0 - y**m)
+        return out
+
+    def __call__(self, r: np.ndarray) -> np.ndarray:
+        r = np.asarray(r, dtype=float)
+        value = self.raw(r)
+        if self.stretch and np.isfinite(self.dmax):
+            at_zero, at_max = self.raw(np.array([0.0, self.dmax]))
+            value = (value - at_max) / (at_zero - at_max)
+        return np.where(r > self.dmax, 0.0, value)
+
+
+@dataclass
+class _Coordination:
+    a: np.ndarray  # atom ids
+    b: np.ndarray  # atom ids; empty: the pairs within a
+    pbc: bool
+    switch: _Rational
+    pair: bool = False  # a[i] with b[i] only
+
+    def value(self, ra: np.ndarray, rb: np.ndarray, box: Box, length_unit: float) -> float:
+        if self.pair:
+            delta = rb - ra
+            keep = self.a != self.b
+        elif len(self.b) == 0:
+            delta = ra[None, :, :] - ra[:, None, :]
+            keep = np.triu(np.ones((len(self.a), len(self.a)), dtype=bool), k=1)
+        else:
+            delta = rb[None, :, :] - ra[:, None, :]
+            keep = self.a[:, None] != self.b[None, :]
+        if self.pbc:
+            delta = box.minimum_image(delta)
+        r = np.linalg.norm(delta, axis=-1)[keep] / length_unit
+        return float(self.switch(r).sum())
+
+
+@dataclass
 class CVProgram:
     """The CVs that a PLUMED input prints, ready to be evaluated on frames."""
 
-    values: dict[str, _Distance]  # printed value name (label or label.min) -> definition
+    values: dict[str, _Distance | _Coordination]  # printed name (label, label.min) -> definition
     prints: list[Print]
     length_unit: float = 10.0  # Å per PLUMED length unit (PLUMED's default is nm)
     atoms: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
@@ -104,6 +180,9 @@ class CVProgram:
         for name, d in self.values.items():
             ra = positions[[index[int(a)] for a in d.a]]
             rb = positions[[index[int(b)] for b in d.b]]
+            if isinstance(d, _Coordination):
+                out[name] = d.value(ra, rb, box, self.length_unit)
+                continue
             delta = rb[None, :, :] - ra[:, None, :]
             if d.pbc:
                 delta = box.minimum_image(delta)
@@ -123,7 +202,7 @@ class CVProgram:
 
 def _define(
     arg: str, definitions: dict[str, tuple[Action, str]], groups: dict[str, list[int]], path: Path
-) -> _Distance:
+) -> _Distance | _Coordination:
     if arg not in definitions:
         raise EstError(f"{path}: PRINT ARG={arg}: no action defines it")
     action, reduction = definitions[arg]
@@ -148,8 +227,63 @@ def _define(
             np.array(_atoms(action.get("GROUPB") or "", groups, path)),
             pbc, reduction.lower(), float(match.group(1)),
         )  # fmt: skip
+    if action.name == "COORDINATION":
+        if reduction:
+            raise EstError(f"{path}: COORDINATION {action.label}: MIN/MAX not supported")
+        return _coordination(action, groups, path, pbc)
     raise EstError(f"{path}: {action.name} ({arg}) is not computed by estk's built-in CVs "
-                   "(DISTANCE, DISTANCES with MIN/MAX); use plumed driver for it")  # fmt: skip
+                   "(DISTANCE, DISTANCES with MIN/MAX, COORDINATION); use plumed driver for "
+                   "it")  # fmt: skip
+
+
+def _coordination(
+    action: Action, groups: dict[str, list[int]], path: Path, pbc: bool
+) -> _Coordination:
+    where = f"{path}: COORDINATION {action.label}"
+    if action.get("GROUPA") is None:
+        raise EstError(f"{where}: needs GROUPA (and GROUPB, or none for pairs within A)")
+    a = np.array(_atoms(action.get("GROUPA") or "", groups, path))
+    b = np.array(_atoms(action.get("GROUPB") or "", groups, path)) if action.get("GROUPB") \
+        else np.empty(0, dtype=np.int64)  # fmt: skip
+    pair = "PAIR" in action.flags
+    if pair and len(a) != len(b):
+        raise EstError(f"{where}: PAIR needs GROUPA and GROUPB of the same length")
+    # NLIST, NL_CUTOFF, NL_STRIDE only speed PLUMED up; estk uses every pair
+    spec = action.get("SWITCH")
+    try:
+        if spec is not None:
+            words = spec.split()
+            if not words or words[0].upper() != "RATIONAL":
+                raise EstError(f"{where}: SWITCH={{{spec}}}: only RATIONAL is supported")
+            options = dict(w.split("=", 1) for w in words[1:] if "=" in w)
+            options = {k.upper(): v for k, v in options.items()}
+            known = {"R_0", "NN", "MM", "D_0", "D_MAX"}
+            if set(options) - known:
+                raise EstError(f"{where}: SWITCH: {', '.join(sorted(set(options) - known))} "
+                               "not supported")  # fmt: skip
+            if "R_0" not in options:
+                raise EstError(f"{where}: SWITCH needs R_0")
+            switch = _Rational(
+                r0=float(options["R_0"]), nn=int(options.get("NN", 6)),
+                mm=int(options.get("MM", 0)), d0=float(options.get("D_0", 0.0)),
+                dmax=float(options.get("D_MAX", np.inf)),
+                stretch="D_MAX" in options and "NOSTRETCH" not in [w.upper() for w in words],
+            )  # fmt: skip
+        else:
+            if action.get("R_0") is None:
+                raise EstError(f"{where}: give R_0 (and NN, MM, D_0) or SWITCH={{RATIONAL ...}}")
+            switch = _Rational(
+                r0=float(action.get("R_0")),  # type: ignore[arg-type]
+                nn=int(action.get("NN") or 6),
+                mm=int(action.get("MM") or 0),
+                d0=float(action.get("D_0") or 0.0),
+            )
+            # PLUMED cuts this form where the function has fallen to about 1e-5, and stretches
+            switch.dmax = switch.d0 + switch.r0 * 1e-5 ** (1.0 / (switch.nn - switch.mm))
+            switch.stretch = True
+    except ValueError as exc:
+        raise EstError(f"{where}: {exc}") from None
+    return _Coordination(a, b, pbc, switch, pair)
 
 
 def _atoms(spec: str, groups: dict[str, list[int]], path: Path) -> list[int]:
