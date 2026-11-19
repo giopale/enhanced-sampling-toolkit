@@ -4,7 +4,8 @@ Supported: ``UNITS`` (LENGTH), ``GROUP ATOMS=...``, ``DISTANCE ATOMS=a,b``, ``DI
 GROUPA=... GROUPB=...`` with ``MIN={BETA=b}`` or ``MAX={BETA=b}``, ``COORDINATION`` (below), and
 ``PRINT ARG=... FILE=... STRIDE=...``. Distances use the minimum image (``NOPBC`` to switch it
 off). The smooth minimum and maximum are PLUMED's: ``b / log(sum_i exp(b / r_i))`` and
-``b log(sum_i exp(r_i / b))``. Other actions are ignored unless a printed value needs them.
+``b log(sum_i exp(r_i / b))``. ``COMBINE`` and ``CUSTOM`` of any of these are computed too
+(``estk.cv.functions``). Other actions are ignored unless a printed value needs them.
 
 ``COORDINATION GROUPA=... [GROUPB=...] [PAIR]`` is PLUMED's: the sum over pairs of the rational
 switching function ``s(r) = (1 - x^n) / (1 - x^m)``, ``x = (r - D_0) / R_0`` (1 for r < D_0).
@@ -28,6 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
+from estk.cv.functions import Function, function_from_action
 from estk.errors import EstError
 from estk.io.lammpstrj import Box, Frame
 from estk.io.plumed import Action, parse_actions
@@ -121,7 +123,8 @@ class _Coordination:
 class CVProgram:
     """The CVs that a PLUMED input prints, ready to be evaluated on frames."""
 
-    values: dict[str, _Distance | _Coordination]  # printed name (label, label.min) -> definition
+    # value name (label, label.min) -> definition; a function's arguments come before it
+    values: dict[str, _Distance | _Coordination | Function]
     prints: list[Print]
     length_unit: float = 10.0  # Å per PLUMED length unit (PLUMED's default is nm)
     atoms: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
@@ -162,12 +165,24 @@ class CVProgram:
                 definitions.setdefault(action.label, (action, ""))
         if not prints:
             raise EstError(f"{path}: no PRINT action, so nothing to compute")
-        values = {}
+        values: dict[str, _Distance | _Coordination | Function] = {}
+
+        def add(arg: str, chain: tuple[str, ...]) -> None:
+            if arg in values:
+                return
+            if arg in chain:
+                raise EstError(f"{path}: {' -> '.join((*chain, arg))}: a value depends on itself")
+            definition = _define(arg, definitions, groups, path)
+            if isinstance(definition, Function):
+                for dependency in definition.args:
+                    add(dependency, (*chain, arg))
+            values[arg] = definition
+
         for p in prints:
             for arg in p.args:
-                if arg not in values:
-                    values[arg] = _define(arg, definitions, groups, path)
-        atoms = np.unique(np.concatenate([np.r_[d.a, d.b] for d in values.values()]))
+                add(arg, ())
+        geometric = [np.r_[d.a, d.b] for d in values.values() if not isinstance(d, Function)]
+        atoms = np.unique(np.concatenate(geometric)) if geometric else np.empty(0, np.int64)
         return cls(values=values, prints=prints, length_unit=length_unit, atoms=atoms)
 
     def evaluate_frame(self, frame: Frame) -> dict[str, float]:
@@ -178,6 +193,9 @@ class CVProgram:
         index = {int(a): k for k, a in enumerate(self.atoms)}
         out = {}
         for name, d in self.values.items():
+            if isinstance(d, Function):  # its arguments are already in out
+                out[name] = d.value(out)
+                continue
             ra = positions[[index[int(a)] for a in d.a]]
             rb = positions[[index[int(b)] for b in d.b]]
             if isinstance(d, _Coordination):
@@ -202,10 +220,12 @@ class CVProgram:
 
 def _define(
     arg: str, definitions: dict[str, tuple[Action, str]], groups: dict[str, list[int]], path: Path
-) -> _Distance | _Coordination:
+) -> _Distance | _Coordination | Function:
     if arg not in definitions:
-        raise EstError(f"{path}: PRINT ARG={arg}: no action defines it")
+        raise EstError(f"{path}: ARG={arg}: no action defines it")
     action, reduction = definitions[arg]
+    if action.name in ("COMBINE", "CUSTOM"):
+        return function_from_action(action, path)
     pbc = "NOPBC" not in action.flags
     if action.name == "DISTANCE":
         atoms = _atoms(action.get("ATOMS") or "", groups, path)
@@ -232,8 +252,8 @@ def _define(
             raise EstError(f"{path}: COORDINATION {action.label}: MIN/MAX not supported")
         return _coordination(action, groups, path, pbc)
     raise EstError(f"{path}: {action.name} ({arg}) is not computed by estk's built-in CVs "
-                   "(DISTANCE, DISTANCES with MIN/MAX, COORDINATION); use plumed driver for "
-                   "it")  # fmt: skip
+                   "(DISTANCE, DISTANCES with MIN/MAX, COORDINATION, COMBINE, CUSTOM); use "
+                   "plumed driver for it")  # fmt: skip
 
 
 def _coordination(

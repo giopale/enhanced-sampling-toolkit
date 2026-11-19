@@ -1046,7 +1046,8 @@ order, orthogonal or triclinic boxes, `.gz`), `src/estk/cv/` (`CVProgram`, `comp
   PLUMED: `UNITS`, `GROUP`, `DISTANCE`, `DISTANCES` with `MIN={BETA}`/`MAX={BETA}` (PLUMED's
   smooth minimum b / log sum exp(b / r_i)), `COORDINATION` with the rational switching
   function (`R_0/NN/MM/D_0` or `SWITCH={RATIONAL ...}`, GROUPB, within GROUPA, or PAIR; cut at
-  d_max and stretched as in PLUMED's `SwitchingFunction.cpp`, 2.5 to 2.9), minimum image
+  d_max and stretched as in PLUMED's `SwitchingFunction.cpp`, 2.5 to 2.9), `COMBINE` and
+  `CUSTOM` (Lepton-style expressions, parsed with a whitelist; no eval), minimum image
   unless `NOPBC`. Other actions are ignored unless a printed value needs them. Checked
   against direct sums written from PLUMED's formulas.
 - **Times from the dump's step numbers** (step x timestep, in COLVAR's time units). `plumed

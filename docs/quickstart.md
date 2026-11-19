@@ -329,7 +329,22 @@ estk along-path reweight-d0-cn/combined.mep.dat dOOliq.min dOO2c.min
   pairs within `GROUPA`, or with `PAIR`). For example:
   `cnO2c: COORDINATION GROUPA=O2c GROUPB=hydrogens R_0=1.2 NN=24 MM=0`. These use PLUMED's
   formulas, including its cut-off and stretching of the switching function, and the minimum
-  image. Other actions in the file are ignored unless a printed value needs them.
+  image. `COMBINE` (`COEFFICIENTS`, `PARAMETERS`, `POWERS`, `NORMALIZE`) and `CUSTOM`
+  (`FUNC=` with `+ - * / ^`, the usual functions, `VAR=`) build values from these. Other
+  actions in the file are ignored unless a printed value needs them.
+- **Example: the fraction of O2c sites protonated** (surface hydroxyls per site, a measure of
+  water dissociation). The coordination counts each O2c–H bond as about 1:
+
+  ```
+  hydrogens: GROUP ATOMS=1-152
+  O2cup: GROUP ATOMS=310,311,312,313,218,220
+  O2cdw: GROUP ATOMS=264,265,266,267,268,269
+  nHup: COORDINATION GROUPA=O2cup GROUPB=hydrogens R_0=1.2 NN=24 MM=0
+  nHdw: COORDINATION GROUPA=O2cdw GROUPB=hydrogens R_0=1.2 NN=24 MM=0
+  nHads: COMBINE ARG=nHup,nHdw PERIODIC=NO
+  covO2c: CUSTOM ARG=nHads FUNC=x/12 PERIODIC=NO
+  PRINT ARG=nHads,covO2c FILE=cv_analysis/CV-cov
+  ```
 - **Times.** The time of a frame is its step number from the dump times the timestep, so the
   values line up with COLVAR, even where a restart wrote some steps twice.
 - **Which dumps work.** Any `dump custom` with an `id` column and coordinates (`x y z`,

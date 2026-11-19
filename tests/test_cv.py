@@ -241,6 +241,53 @@ def test_coordination_by_hand(tmp_path):
             assert value == pytest.approx((0.5 - sd) / (1 - sd), abs=1e-5)
 
 
+FUNCTIONS = """UNITS LENGTH=A
+hydrogens: GROUP ATOMS=5-12
+O2cup: GROUP ATOMS=1,2
+O2cdw: GROUP ATOMS=3,4
+nHup: COORDINATION GROUPA=O2cup GROUPB=hydrogens R_0=3.0 NN=24 MM=0
+nHdw: COORDINATION GROUPA=O2cdw GROUPB=hydrogens R_0=3.0 NN=24 MM=0
+nHads: COMBINE ARG=nHup,nHdw PERIODIC=NO
+covO2c: CUSTOM ARG=nHads FUNC=x/4 PERIODIC=NO
+d: DISTANCE ATOMS=1,5
+mix: COMBINE ARG=nHup,d COEFFICIENTS=2,3 PARAMETERS=0.5,1 POWERS=2,1 NORMALIZE PERIODIC=NO
+f: CUSTOM ARG=covO2c,d VAR=c,r FUNC=c^2+exp(-r)*max(r,2)-step(r-3)+2*pi PERIODIC=NO
+PRINT ARG=covO2c,mix,f FILE=x
+"""
+
+
+def test_combine_and_custom(tmp_path):
+    (tmp_path / "f.plumed").write_text(FUNCTIONS)
+    program = CVProgram.from_plumed(tmp_path / "f.plumed")
+    names = list(program.values)  # each function after its arguments
+    for later, earlier in [("nHads", "nHup"), ("covO2c", "nHads"), ("mix", "d"), ("f", "covO2c")]:
+        assert names.index(earlier) < names.index(later)
+    np.testing.assert_array_equal(program.atoms, np.arange(1, 13))
+    box = Box(lo=np.zeros(3), matrix=np.diag(L))
+    for step in range(3):
+        r = positions(step)
+        v = program.evaluate(r, box)
+        up = brute_coordination(r, [0, 1], list(range(4, 12)), L, r0=3.0, nn=24)
+        down = brute_coordination(r, [2, 3], list(range(4, 12)), L, r0=3.0, nn=24)
+        assert v["covO2c"] == pytest.approx((up + down) / 4, rel=1e-12)
+        d = np.linalg.norm(brute_min_image(r[0], r[4][None, :])[0])
+        assert v["mix"] == pytest.approx(0.4 * (up - 0.5) ** 2 + 0.6 * (d - 1), rel=1e-12)
+        c = v["covO2c"]
+        expected = c**2 + np.exp(-d) * max(d, 2) - (1.0 if d >= 3 else 0.0) + 2 * np.pi
+        assert v["f"] == pytest.approx(expected, rel=1e-12)
+
+    # a function of one geometric value needs only its atoms
+    (tmp_path / "g.plumed").write_text(
+        "UNITS LENGTH=A\nd: DISTANCE ATOMS=3,7\nhalf: CUSTOM ARG=d FUNC=x/2\n"
+        "bad: CUSTOM ARG=d FUNC=log(x-100)\nPRINT ARG=half,bad FILE=x\n"
+    )
+    small = CVProgram.from_plumed(tmp_path / "g.plumed")
+    np.testing.assert_array_equal(small.atoms, [3, 7])
+    v = small.evaluate(positions(0)[[2, 6]], box)
+    assert v["half"] == pytest.approx(v["d"] / 2)
+    assert np.isnan(v["bad"])  # log of a negative number: NaN, not a crash
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [("d: DISTANCES GROUPA=1 GROUPB=2,3\nPRINT ARG=d FILE=x\n", "MIN"),
@@ -250,6 +297,14 @@ def test_coordination_by_hand(tmp_path):
      ("c: COORDINATION GROUPA=1,2 GROUPB=3 PAIR R_0=1\nPRINT ARG=c FILE=x\n", "same length"),
      ("c: COORDINATION GROUPA=1 GROUPB=2 R_0=1 NN=6 MM=6\nPRINT ARG=c FILE=x\n", "NN != MM"),
      ("PRINT ARG=nothing FILE=x\n", "no action defines"),
+     ("d: DISTANCE ATOMS=1,2\nf: CUSTOM ARG=d FUNC=__import__('os')\nPRINT ARG=f FILE=x\n",
+      "only numbers"),
+     ("d: DISTANCE ATOMS=1,2\nf: CUSTOM ARG=d FUNC=x*w\nPRINT ARG=f FILE=x\n", "unknown name 'w'"),
+     ("d: DISTANCE ATOMS=1,2\nf: CUSTOM ARG=d FUNC=x.real\nPRINT ARG=f FILE=x\n", "only numbers"),
+     ("d: DISTANCE ATOMS=1,2\nf: CUSTOM ARG=d FUNC=(x\nPRINT ARG=f FILE=x\n", "parse"),
+     ("d: DISTANCE ATOMS=1,2\nf: CUSTOM ARG=d VAR=a,b FUNC=a\nPRINT ARG=f FILE=x\n", "VAR"),
+     ("d: DISTANCE ATOMS=1,2\nf: COMBINE ARG=d,d POWERS=2\nPRINT ARG=f FILE=x\n", "POWERS"),
+     ("a: COMBINE ARG=b\nb: COMBINE ARG=a\nPRINT ARG=a FILE=x\n", "depends on itself"),
      ("d: DISTANCE ATOMS=1,2\n", "no PRINT"),
      ("d: DISTANCE ATOMS=1,2,3\nPRINT ARG=d FILE=x\n", "two atoms"),
      ("d: DISTANCE ATOMS=1,@water\nPRINT ARG=d FILE=x\n", "not understood"),
