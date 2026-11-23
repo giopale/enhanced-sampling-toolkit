@@ -380,6 +380,61 @@ estk cv proton-transfer --kind indirect --donor pt_type1 --acceptor site_A \
   ECToolkits sometimes uses the donor itself as the "bridge", by a numerical accident.
   `--ectoolkits-compat` reproduces that, to compare with old files.
 
+### Basin populations
+
+How much of the equilibrium ensemble is in each basin, and the average of any quantity there:
+
+```bash
+estk basins d0 cn --time 1 inf --quantity covO2c
+estk basins d0 cn --surface reweight-d0-cn/combined.dat --quantity covO2c   # reuse a surface
+```
+
+```
+basin   d0     cn     F (eV)   population        ΔF (eV)          surface   n_eff   <covO2c>
+1       2.21   1.95   0        0.83 ± 0.04       0                0.83      41200   0.012 ± 0.002
+2       1.86   1.02   0.041    0.17 ± 0.04       0.041 ± 0.007    0.18      3900    0.094 ± 0.01
+outside the grid limits (walls): 6.8 % of frames (not in the populations)
+total <covO2c> = 0.026 ± 0.003
+```
+
+- **Basins.**
+  - By default, every grid point belongs to the minimum it descends to on the free-energy
+    surface.
+  - Minima less than `--min-depth` (2 kT) deep are merged into a neighbour, as `estk mep`
+    does when it picks its ends.
+  - To set them yourself, name regions in `estk.yaml`; a CV left out is not restricted,
+    `null` is an open end:
+
+    ```yaml
+    basins:
+      molecular:   {d0: [1.9, 2.5], cn: [1.6, 2.2]}
+      dissociated: {cn: [null, 1.3]}
+    ```
+
+    Frames in no region are reported as "in no region".
+- **Populations are counted on the frames.** P_A = Σ_{i∈A} wᵢ / Σᵢ wᵢ with wᵢ = exp(Vᵢ/kT).
+  No kernel is involved, so the bandwidth doesn't matter. ΔF = −kT ln(P_A/P_ref), relative to
+  the most populated basin.
+  - **surface:** the same populations integrated from the surface, as a check. estk warns if
+    they differ by more than 0.05.
+- **Walls.**
+  - Only frames inside the grid limits count; those default to the PLUMED walls, as for the
+    surfaces.
+  - The populations are the equilibrium ones within the region the walls allow.
+  - Frames past the walls are reported, but not counted.
+- **Errors.**
+  - With several runs: the standard error between runs, combined like the surfaces
+    (`--combine`).
+  - With one run: the standard error between `--blocks` time blocks.
+  - Walkers sharing one bias are not independent, so their spread understates the error.
+- **`--quantity`** gives ⟨q⟩ within each basin and over everything:
+  ⟨q⟩ = Σ_A P_A ⟨q⟩_A (plus the part in no region).
+- **Files** in `basins-<cvs>/`:
+  - `basins.dat`: the table, with its settings in the header;
+  - `basins-map.dat`: the basin of each grid point;
+  - `basins.png`: the surface with the basin boundaries and populations; draw a path on it
+    with `--path`.
+
 ## 7. Figures
 
 ```bash

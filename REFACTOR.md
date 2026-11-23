@@ -151,6 +151,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
 | 18 | [Tests, CI and docs](#18-tests-ci-and-docs) | in progress |
+| 19 | [Basin populations](#19-basin-populations) | done |
 
 ---
 
@@ -1167,6 +1168,25 @@ figures (`docs/images/`, made from `tests/data/runs`), linked from the README.
 - **Docs:** README with install + a 5-minute tutorial (`estk init`, `estk reweight`, `estk mep`,
   `estk plot surface`); `docs/` for the reweighting conventions (sections 6–8) and a page per
   command; docstrings on the public API.
+
+
+## 19. Basin populations
+
+**Status: done** (new; not in the original scripts).
+
+`estk basins CV... [--surface FILE] [--min-depth KT] [--quantity Q] [--time] [--blocks]`.
+`estk.analysis.basin_populations` returns a `BasinResult` (save/load), and `plot_basins` draws
+the map.
+- **Basins.** A watershed of the free-energy surface: grid points are added from the lowest up,
+  each joins the basin of its lowest neighbour, and basins shallower than `min_depth` are merged
+  where they spill (the same persistence `find_minima` uses). Alternatively, named regions under
+  `basins:` in `estk.yaml`.
+- **Populations** are counted on the frames, without kernels, using the frames inside the grid
+  limits. The runs are combined like the surfaces. The error is the standard error between
+  runs, or between time blocks of one run. The surface integral is a check.
+- **Basin averages** ⟨q⟩_A of any CV or file column; the total is Σ P_A ⟨q⟩_A.
+- **Tested** on a tilted double well with exact populations: frames and surface agree with the
+  exact value, and ΔF and ⟨q⟩ match.
 
 ---
 

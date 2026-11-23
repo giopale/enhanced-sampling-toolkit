@@ -208,6 +208,8 @@ class ProjectConfig(_Section):
     atoms: AtomsConfig = Field(default_factory=AtomsConfig)
     reaction: ReactionConfig = Field(default_factory=ReactionConfig)
     plot: PlotConfig = Field(default_factory=PlotConfig)
+    # named regions for estk basins: {name: {cv: [lo, hi]}} (null for an open end)
+    basins: dict[str, dict[str, tuple[float | None, float | None]]] = Field(default_factory=dict)
 
     _path: Path | None = PrivateAttr(default=None)
 
@@ -218,6 +220,19 @@ class ProjectConfig(_Section):
         if isinstance(data, dict):
             return {k: v for k, v in data.items() if v is not None}
         return data
+
+    @field_validator("basins")
+    @classmethod
+    def _check_regions(
+        cls, value: dict[str, dict[str, tuple[float | None, float | None]]]
+    ) -> dict[str, dict[str, tuple[float | None, float | None]]]:
+        for name, region in value.items():
+            if not region:
+                raise ValueError(f"basin '{name}': give the range of at least one CV")
+            for cv, (lo, hi) in region.items():
+                if lo is not None and hi is not None and not lo < hi:
+                    raise ValueError(f"basin '{name}': {cv} range [{lo}, {hi}] is empty")
+        return value
 
     @property
     def path(self) -> Path | None:

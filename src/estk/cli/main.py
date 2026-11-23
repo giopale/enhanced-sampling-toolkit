@@ -731,6 +731,154 @@ def along_path(
     console.print(f"wrote {data_path}")
 
 
+@app.command("basins")
+@handle_errors
+def basins(
+    names: Annotated[list[str], typer.Argument(help="CVs of the free-energy surface, e.g. d0 cn.")],
+    surface_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--surface",
+            help="Use this free-energy surface (e.g. reweight-d0-cn/combined.dat) for the grid "
+            "and the basins instead of reweighting now.",
+        ),
+    ] = None,
+    min_depth: Annotated[
+        float, typer.Option(help="Basins shallower than this (kT) are merged into neighbours.")
+    ] = 2.0,
+    quantity: Annotated[
+        list[str] | None,
+        typer.Option(help="Quantity to average in each basin, e.g. covO2c (repeat)."),
+    ] = None,
+    source: Annotated[
+        list[str] | None,
+        typer.Option(help="File of a quantity not in COLVAR/CV-<name>, e.g. q=file (repeat)."),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None,
+        typer.Option(help="Time window in ns, e.g. --time 1 inf (skip the first ns)."),
+    ] = None,
+    blocks: Annotated[
+        int, typer.Option(help="Time blocks per run: the error bar when there is one run.")
+    ] = 4,
+    combine: Annotated[str, typer.Option(help="equal (default) or probability.")] = "equal",
+    points: Annotated[
+        str, typer.Option(help="Grid points when reweighting here (100 or 100,80).")
+    ] = "100",
+    limits: Annotated[
+        list[str] | None, typer.Option(help="Grid limits when reweighting, e.g. d0=1.5,2.5.")
+    ] = None,
+    bandwidth: Annotated[
+        list[str] | None,
+        typer.Option(help="Bandwidths when reweighting, e.g. d0=0.02, or scv / silverman."),
+    ] = None,
+    path: Annotated[
+        Path | None, typer.Option(help="Minimum energy path (.mep.dat) to draw on the map.")
+    ] = None,
+    units: UnitsOption = None,
+    style: StyleOption = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Output folder (default: basins-<cvs>)."),
+    ] = None,
+) -> None:
+    """Populations of the free-energy basins, counted on the reweighted frames: automatic
+    basins of the surface, or the named regions under basins: in estk.yaml. With --quantity,
+    also the average of each quantity in each basin and over everything."""
+    import matplotlib.pyplot as plt
+
+    from estk.analysis import basin_populations
+    from estk.paths import MinimumEnergyPath
+    from estk.plotting import labels_from_config, plot_basins, plot_style
+    from estk.plotting.core import energy_scale, use_agg
+    from estk.project import Project
+    from estk.surface import Surface
+
+    config = load_config(_state["config"])
+    project = Project(config)
+    sources = {}
+    for item in source or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name or not value:
+            raise EstError(f"--source: expected e.g. covO2c=cv_analysis/CV-cov, got {item!r}")
+        sources[name] = value
+    mode = combine.lower()
+    if surface_file is not None:
+        surface = Surface.load(surface_file)
+        if any([limits, bandwidth, points != "100"]):
+            err_console.print("[yellow]--points/--limits/--bandwidth ignored: the grid comes "
+                              "from --surface[/yellow]")  # fmt: skip
+    else:
+        surface = project.reweight(
+            names, time=time, combine=mode, points=_parse_points(points),
+            limits=_parse_assignments(limits, "limits", pair=True), **_parse_bandwidth(bandwidth),
+        ).combined  # fmt: skip
+    result = basin_populations(
+        project, names, surface=surface, min_depth_kt=min_depth, quantities=quantity or [],
+        sources=sources, time=time, blocks=blocks, combine=mode,
+    )  # fmt: skip
+
+    folder = output or Path("basins-" + "-".join(names))
+    folder.mkdir(parents=True, exist_ok=True)
+    data_path = result.save(folder / "basins.dat")
+    map_path = result.label_surface().save(folder / "basins-map.dat")
+
+    units, style = _display(units, style)
+    factor, unit_label = energy_scale(result.units, units, result.kbt)
+    how = "named regions (estk.yaml)" if result.metadata["mode"] == "regions" \
+        else f"automatic, merged below {min_depth:g} kT"  # fmt: skip
+    table = Table("basin", *names, f"F ({unit_label})", "population", f"ΔF ({unit_label})",
+                  "surface", "n_eff", *[f"<{q}>" for q in result.quantities],
+                  title=f"basins: {how}")  # fmt: skip
+
+    def pm(value: float, error: float, fmt: str = ".4g") -> str:
+        """value ± error; errors below rounding show as 0, unknown ones not at all."""
+        if not np.isfinite(error):
+            return format(value, fmt)
+        error = 0.0 if error < 1e-9 * max(abs(value), 1e-300) else error
+        return f"{value:{fmt}} ± {error:.2g}"
+
+    for b in result.basins:
+        delta, delta_err = result.free_energy_difference(b)
+        averages = [pm(b.averages[q], b.average_errors[q]) for q in result.quantities]
+        table.add_row(
+            b.name, *[f"{v:.4g}" for v in b.point], f"{b.free_energy * factor:.3g}",
+            pm(b.population, b.error, ".4f"),
+            "0" if delta == 0 else pm(delta * factor, delta_err * factor, ".3g"),
+            f"{b.surface_population:.4f}", f"{b.effective_frames:.0f}", *averages,
+        )  # fmt: skip
+    console.print(table)
+    kind = "runs" if len(result.metadata["runs"]) > 1 else "time blocks"
+    console.print(
+        f"errors: standard error between {kind}; ΔF from the most populated basin; "
+        "surface: populations integrated from the surface (a check)",
+        style="dim",
+    )
+    if result.metadata["mode"] == "regions":
+        console.print(f"in no region: {result.unassigned:.4f} of the population")
+    console.print(f"outside the grid limits (walls): {100 * result.outside_fraction:.1f} % of "
+                  "frames (not in the populations)")  # fmt: skip
+    for q, (value, e) in result.totals.items():
+        console.print(f"total <{q}> = {pm(value, e)}")
+    gap = max((abs(b.population - b.surface_population) for b in result.basins), default=0.0)
+    if gap > 0.05:
+        err_console.print(
+            f"[yellow]frames and surface disagree by up to {gap:.2f} in a population: "
+            "check the bandwidths and the grid limits[/yellow]"
+        )
+
+    use_agg()
+    with plot_style(style):
+        drawn = MinimumEnergyPath.load(path) if path else None
+        ax = plot_basins(result, surface, path=drawn, units=units,
+                         labels=labels_from_config(config))  # fmt: skip
+        target = folder / "basins.png"
+        ax.figure.savefig(target)
+        plt.close(ax.figure)
+    for written in (data_path, map_path, target):
+        console.print(f"wrote {written}")
+
+
 @plot_app.command("surface")
 @handle_errors
 def plot_surface_command(
