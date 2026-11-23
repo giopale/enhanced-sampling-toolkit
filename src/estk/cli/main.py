@@ -879,6 +879,113 @@ def basins(
         console.print(f"wrote {written}")
 
 
+structures_app = typer.Typer(
+    help="Atomic configurations picked from the simulations.", no_args_is_help=True
+)
+app.add_typer(structures_app, name="structures")
+
+
+@structures_app.command("basins")
+@handle_errors
+def structures_basins(
+    names: Annotated[list[str], typer.Argument(help="CVs of the free-energy surface, e.g. d0 cn.")],
+    n: Annotated[int, typer.Option("-n", help="Structures per basin.")] = 10,
+    basin: Annotated[
+        list[str] | None, typer.Option(help="Basin to sample (repeat; default: all).")
+    ] = None,
+    surface_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--surface",
+            help="Free-energy surface for the grid and the basins (default: reweight now).",
+        ),
+    ] = None,
+    min_depth: Annotated[
+        float, typer.Option(help="Basins shallower than this (kT) are merged into neighbours.")
+    ] = 2.0,
+    mode: Annotated[
+        str,
+        typer.Option(
+            help="boltzmann (default: as the free energy, low F more often) or "
+            "uniform (every frame of the basin alike)."
+        ),
+    ] = "boltzmann",
+    quantity: Annotated[
+        list[str] | None,
+        typer.Option(help="Other quantity to write in the headers, e.g. covO2c (repeat)."),
+    ] = None,
+    source: Annotated[
+        list[str] | None,
+        typer.Option(help="File of a quantity not in COLVAR/CV-<name>, e.g. q=file (repeat)."),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None,
+        typer.Option(help="Time window in ns, e.g. --time 1 inf (skip the first ns)."),
+    ] = None,
+    combine: Annotated[str, typer.Option(help="equal (default) or probability.")] = "equal",
+    dump: Annotated[
+        str, typer.Option(help="LAMMPS dump in each run folder (walkers: traj.<i>.lammpstrj).")
+    ] = "traj.lammpstrj",
+    seed: Annotated[int, typer.Option(help="Random seed (the same seed, the same sample).")] = 0,
+    points: Annotated[
+        str, typer.Option(help="Grid points when reweighting here (100 or 100,80).")
+    ] = "100",
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="extxyz file (default: structures-<cvs>.extxyz)."),
+    ] = None,
+) -> None:
+    """Sample structures from the free-energy basins (those of estk basins) and write them to
+    one extended-XYZ file, with each frame's CVs, basin, run, step and free energy in its
+    header."""
+    from estk.analysis.structures import sample_basins
+    from estk.project import Project
+    from estk.surface import Surface
+
+    config = load_config(_state["config"])
+    project = Project(config)
+    sources = {}
+    for item in source or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name or not value:
+            raise EstError(f"--source: expected e.g. covO2c=cv_analysis/CV-cov, got {item!r}")
+        sources[name] = value
+    if surface_file is not None:
+        surface = Surface.load(surface_file)
+    else:
+        surface = project.reweight(names, time=time, combine=combine.lower(),
+                                   points=_parse_points(points)).combined  # fmt: skip
+    sample = sample_basins(
+        project, names, surface, n=n, basins=basin, min_depth_kt=min_depth,
+        quantities=quantity or [], sources=sources, time=time, mode=mode.lower(),
+        combine=combine.lower(), dump=dump, seed=seed,
+    )  # fmt: skip
+    target = output or Path("structures-" + "-".join(names) + ".extxyz")
+    units, _ = _display(None, None)
+    sample.write(project, target, dump=dump, units=units)
+
+    from estk.plotting.core import energy_scale
+
+    kbt = surface.metadata.get("kbt")
+    factor, unit_label = energy_scale(surface.units, units, kbt)
+    table = Table(
+        "basin", "structures", "frames to draw from", "effective frames",
+        f"F ({unit_label}) of the structures", *[f"{c} range" for c in names],
+    )  # fmt: skip
+    for name, count in sample.candidates.items():
+        frames = [f for f in sample.frames if f.basin == name]
+        if not frames:
+            table.add_row(name, "0", str(count), "-", "-", *["-" for _ in names])
+            continue
+        fes = np.array([f.free_energy for f in frames]) * factor
+        ranges = [f"{min(f.values[c] for f in frames):.3g} – {max(f.values[c] for f in frames):.3g}"
+                  for c in names]  # fmt: skip
+        table.add_row(name, str(len(frames)), str(count), f"{sample.effective[name]:.0f}",
+                      f"{np.nanmin(fes):.3g} – {np.nanmax(fes):.3g}", *ranges)  # fmt: skip
+    console.print(table)
+    console.print(f"wrote {len(sample.frames)} structures to {target} (mode {mode.lower()})")
+
+
 @plot_app.command("surface")
 @handle_errors
 def plot_surface_command(

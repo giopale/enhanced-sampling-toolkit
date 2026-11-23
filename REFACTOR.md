@@ -146,7 +146,7 @@ estk mep reweight-d0-cn/combined.dat             # -> reweight-d0-cn/combined.me
 | 11 | [Barrier convergence](#11-barrier-convergence) | done |
 | 12 | [Surface plotting](#12-surface-plotting) | done |
 | 13 | [CVs along the path](#13-cvs-along-the-path) | done |
-| 14 | [Structure extraction](#14-structure-extraction) | todo |
+| 14 | [Structure extraction](#14-structure-extraction) | in progress |
 | 15 | [Proton-transfer CVs](#15-proton-transfer-cvs) | done |
 | 16 | [Diagnostic plots](#16-diagnostic-plots) | done |
 | 17 | [Standalone tools](#17-standalone-tools) | todo |
@@ -968,7 +968,23 @@ Notes on what was built:
 
 ## 14. Structure extraction
 
-**Status:** todo
+**Status:** in progress.
+
+Done: `estk structures basins`, which samples structures from the basins of `estk basins`
+(`estk.analysis.structures.sample_basins` -> `BasinSample.write`):
+- Frames are drawn with probability exp(V/kT) (`boltzmann`) or uniformly, among those that are
+  in the LAMMPS dumps.
+- They are written to one extxyz file, with the CVs, quantities, basin, run, walker, step, time
+  and F in each header.
+- The dump reader gained `scan_steps` and `iter_frames(steps=)`, which skips unwanted frames
+  without parsing them.
+- The basin definition is shared with `estk basins` (`define_basins`), which replaces the
+  isovalue flood fill.
+
+To do:
+- `structures near` (frames near a point);
+- H5MD and XYZ trajectories;
+- removing the old `find_structures*` modules.
 
 ### Current state
 - `commands/find_structures.py`: for each chosen point on the FES, computes per-frame kernel

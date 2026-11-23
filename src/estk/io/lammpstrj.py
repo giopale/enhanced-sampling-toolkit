@@ -10,7 +10,7 @@ triclinic. Files ending in ``.gz`` are read compressed.
 from __future__ import annotations
 
 import gzip
-from collections.abc import Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from itertools import islice
@@ -54,11 +54,52 @@ class Frame:
     columns: dict[str, np.ndarray] = field(default_factory=dict)  # other columns, as text
 
 
+def dump_columns(path: Path | str) -> list[str]:
+    """The per-atom column names of a dump (from its first ``ITEM: ATOMS`` line)."""
+    path = Path(path)
+    if not path.is_file():
+        raise MissingFileError(f"dump file not found: {path}")
+    with _open(path) as f:
+        for line in f:
+            if line.startswith("ITEM: ATOMS"):
+                return line.split()[2:]
+    raise EstError(f"{path}: no frames")
+
+
+def scan_steps(path: Path | str) -> np.ndarray:
+    """The step numbers of a dump's complete frames, in file order (without reading atoms)."""
+    path = Path(path)
+    if not path.is_file():
+        raise MissingFileError(f"dump file not found: {path}")
+    steps = []
+    with _open(path) as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            if not line.startswith("ITEM: TIMESTEP"):
+                if line.strip():
+                    raise EstError(f"{path}: expected 'ITEM: TIMESTEP', got {line.strip()!r}")
+                continue
+            step = int(f.readline().split()[0])
+            _expect(f, "ITEM: NUMBER OF ATOMS", path)
+            n_atoms = int(f.readline())
+            skipped = sum(1 for _ in islice(f, 5 + n_atoms))  # BOX BOUNDS + 3, ATOMS, atoms
+            if skipped < 5 + n_atoms:
+                break  # the last frame was cut off
+            steps.append(step)
+    return np.array(steps, dtype=np.int64)
+
+
 def iter_frames(
-    path: Path | str, atoms: Sequence[int] | None = None, columns: Sequence[str] = ()
+    path: Path | str,
+    atoms: Sequence[int] | None = None,
+    columns: Sequence[str] = (),
+    steps: Collection[int] | None = None,
 ) -> Iterator[Frame]:
     """Yield the frames of a dump; with ``atoms``, only those ids, in that order (all atoms:
-    sorted by id). ``columns`` (e.g. ``"type"``) are also returned, as text, per atom."""
+    sorted by id). ``columns`` (e.g. ``"type"``) are also returned, as text, per atom. With
+    ``steps``, only the frames of those steps (the others are skipped without being parsed)."""
     path = Path(path)
     if not path.is_file():
         raise MissingFileError(f"dump file not found: {path}")
@@ -77,6 +118,10 @@ def iter_frames(
             step = int(f.readline().split()[0])
             _expect(f, "ITEM: NUMBER OF ATOMS", path)
             n_atoms = int(f.readline())
+            if steps is not None and step not in steps:
+                if sum(1 for _ in islice(f, 5 + n_atoms)) < 5 + n_atoms:
+                    return  # the last frame was cut off
+                continue
             box = _read_box(f, path)
             header = f.readline()
             if not header.startswith("ITEM: ATOMS"):

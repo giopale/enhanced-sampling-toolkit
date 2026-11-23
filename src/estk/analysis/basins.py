@@ -147,6 +147,53 @@ def _frame_labels(
     return out
 
 
+@dataclass
+class BasinDefinition:
+    """Which basin every grid point (and so every frame) belongs to."""
+
+    names: list[str]
+    labels: np.ndarray  # basin of every grid point (NO_DATA: none)
+    grid: Grid
+    kbt: float
+    mode: str  # "automatic" or "regions"
+    regions: dict[str, Region] | None = None
+
+    def frame_labels(self, points: np.ndarray) -> np.ndarray:
+        """Basin of each frame (``OUTSIDE`` past the grid limits, ``NO_DATA`` in none)."""
+        return _frame_labels(points, self.grid, self.labels, self.regions)
+
+
+def define_basins(
+    project: Project,
+    cvs: Sequence[str],
+    surface: Surface,
+    *,
+    regions: Mapping[str, Region] | None = None,
+    min_depth_kt: float = 2.0,
+) -> BasinDefinition:
+    """The basins of ``surface``: the named ``regions`` (default: ``basins:`` of estk.yaml, if
+    set) or the automatic basins (``basin_map``, merged below ``min_depth_kt``)."""
+    cvs = list(cvs)
+    if not surface.is_fes:
+        raise EstError(f"the surface is a {surface.quantity} surface, not a free energy")
+    if list(surface.grid.names) != cvs:
+        raise EstError(f"the surface is in {surface.grid.names}, the basins in {tuple(cvs)}")
+    kbt = float(surface.metadata.get("kbt") or 0.0)
+    if kbt <= 0:
+        raise EstError("the surface has no kT in its metadata")
+    if regions is None and project.config.basins:
+        regions = {name: dict(r) for name, r in project.config.basins.items()}
+    if regions:
+        unknown = sorted({cv for r in regions.values() for cv in r} - set(cvs))
+        if unknown:
+            raise EstError(f"basin regions use {', '.join(unknown)}, not CVs of {tuple(cvs)}")
+        return BasinDefinition(list(regions), region_map(surface.grid, regions), surface.grid,
+                               kbt, "regions", dict(regions))  # fmt: skip
+    labels, minima = basin_map(surface, min_depth_kt * kbt)
+    names = [str(k + 1) for k in range(len(minima))]
+    return BasinDefinition(names, labels, surface.grid, kbt, "automatic")
+
+
 # --- result -----------------------------------------------------------------------------------
 
 
@@ -373,29 +420,9 @@ def basin_populations(
     if surface is None:
         options = dict(reweight_options or {})
         surface = project.reweight(cvs, time=time, combine=combine, **options).combined
-    if not surface.is_fes:
-        raise EstError(f"the surface is a {surface.quantity} surface, not a free energy")
-    if list(surface.grid.names) != cvs:
-        raise EstError(f"the surface is in {surface.grid.names}, the basins in {tuple(cvs)}")
-    kbt = float(surface.metadata.get("kbt") or 0.0)
-    if kbt <= 0:
-        raise EstError("the surface has no kT in its metadata")
-    grid = surface.grid
-
-    if regions is None and project.config.basins:
-        regions = {name: dict(r) for name, r in project.config.basins.items()}
-    if regions:
-        unknown = sorted({cv for r in regions.values() for cv in r} - set(cvs))
-        if unknown:
-            raise EstError(f"basin regions use {', '.join(unknown)}, not CVs of {tuple(cvs)}")
-        labels = region_map(grid, regions)
-        names = list(regions)
-        mode = "regions"
-    else:
-        labels, minima_index = basin_map(surface, min_depth_kt * kbt)
-        names = [str(k + 1) for k in range(len(minima_index))]
-        mode = "automatic"
-        regions = None
+    definition = define_basins(project, cvs, surface, regions=regions, min_depth_kt=min_depth_kt)
+    kbt, grid, labels = definition.kbt, surface.grid, definition.labels
+    names, mode, regions = definition.names, definition.mode, definition.regions
     n = len(names)
 
     extra = {q: f for q, f in (sources or {}).items() if q in quantities}

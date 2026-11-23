@@ -435,6 +435,43 @@ total <covO2c> = 0.026 ± 0.003
   - `basins.png`: the surface with the basin boundaries and populations; draw a path on it
     with `--path`.
 
+### Structures from the basins
+
+```bash
+estk structures basins d0 cn --surface reweight-d0-cn/combined.dat -n 20 --time 1 inf \
+    --quantity covO2c --quantity dOOliq.min
+```
+
+This writes `structures-d0-cn.extxyz`: 20 structures from each basin, in one file.
+
+- **Which frames.**
+  - The basins are those of `estk basins`: automatic, or the named regions in `estk.yaml`.
+    `--basin 2` samples only that basin.
+  - Frames come only from the CV files and the dumps (each walker's `traj.<i>.lammpstrj`).
+    Only frames that are also in the dump can be picked, so the dump stride limits the choice.
+- **How they are drawn (`--mode`).** Frames are drawn without repeats.
+  - **`boltzmann` (default):** with probability exp(V/kT), the reweighting factor. The
+    structures then follow the equilibrium distribution within the basin: low free energy
+    more often than high. Runs are combined as for the surfaces.
+  - **`uniform`:** every frame of the basin is equally likely. The biased ensemble also
+    reaches the higher-F parts of the basin, e.g. for training sets.
+  - **Warning:** estk warns when you ask for more structures than about half the basin's
+    effective frames. The extra structures then come from rare, high-F frames.
+  - `--seed` fixes the draw.
+- **Header of each structure.**
+  - Read by ASE (`ase.io.read(file, index=":")`, then `atoms.info`):
+    - the CVs, and every `--quantity`; dots become underscores, so `dOOliq.min` is
+      `dOOliq_min`;
+    - `basin`, `run`, `walker`, `step`, `time_ps`;
+    - `fes`: the free energy of the surface at the structure's CVs, in `plot.units`;
+    - `sampling`: the mode used.
+  - Also `Lattice` and `pbc`.
+- **Atoms.**
+  - Atoms are written in id order, at the dump's positions, shifted so that the cell starts at
+    the origin.
+  - Species come from the dump's `element` column, or from `type` via `atoms.type_map` in
+    `estk.yaml`.
+
 ## 7. Figures
 
 ```bash
