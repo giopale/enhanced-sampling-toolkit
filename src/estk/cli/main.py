@@ -832,9 +832,11 @@ def basins(
     factor, unit_label = energy_scale(result.units, units, result.kbt)
     how = "named regions (estk.yaml)" if result.metadata["mode"] == "regions" \
         else f"automatic, merged below {min_depth:g} kT"  # fmt: skip
-    table = Table("basin", *names, f"F ({unit_label})", "population", f"ΔF ({unit_label})",
-                  "surface", "n_eff", *[f"<{q}>" for q in result.quantities],
-                  title=f"basins: {how}")  # fmt: skip
+    table = Table(
+        "basin", *names, f"F ({unit_label})", "in the grid", f"ΔF ({unit_label})", "surface",
+        "of all frames", "n_eff", *[f"<{q}>" for q in result.quantities],
+        title=f"basins: {how}",
+    )  # fmt: skip
 
     def pm(value: float, error: float, fmt: str = ".4g") -> str:
         """value ± error; errors below rounding show as 0, unknown ones not at all."""
@@ -850,21 +852,32 @@ def basins(
             b.name, *[f"{v:.4g}" for v in b.point], f"{b.free_energy * factor:.3g}",
             pm(b.population, b.error, ".4f"),
             "0" if delta == 0 else pm(delta * factor, delta_err * factor, ".3g"),
-            f"{b.surface_population:.4f}", f"{b.effective_frames:.0f}", *averages,
+            f"{b.surface_population:.4f}", pm(b.population_of_all, b.error_of_all, ".4f"),
+            f"{b.effective_frames:.0f}", *averages,
         )  # fmt: skip
+    past, past_err = result.outside_population
+    empty = [""] * len(names)
+    table.add_row(
+        "past the walls", *empty, "", "", "", "", pm(past, past_err, ".4f"), "",
+        *["" for _ in result.quantities], style="dim",
+    )  # fmt: skip
     console.print(table)
     kind = "runs" if len(result.metadata["runs"]) > 1 else "time blocks"
     console.print(
         f"errors: standard error between {kind}; ΔF from the most populated basin; "
-        "surface: populations integrated from the surface (a check)",
+        "surface: populations integrated from the surface (a check); of all frames: past the "
+        "walls too (the walls kept, OPES reweighted), comparable between surfaces",
         style="dim",
     )
     if result.metadata["mode"] == "regions":
-        console.print(f"in no region: {result.unassigned:.4f} of the population")
-    console.print(f"outside the grid limits (walls): {100 * result.outside_fraction:.1f} % of "
-                  "frames (not in the populations)")  # fmt: skip
+        console.print(f"in no region: {result.unassigned:.4f} in the grid, "
+                      f"{result.unassigned_of_all:.4f} of all frames")  # fmt: skip
+    console.print(f"past the grid limits (walls): {100 * result.outside_fraction:.1f} % of the "
+                  f"frames, {100 * past:.1f} % of the reweighted population")  # fmt: skip
     for q, (value, e) in result.totals.items():
-        console.print(f"total <{q}> = {pm(value, e)}")
+        everything = result.totals_of_all.get(q)
+        console.print(f"total <{q}> = {pm(value, e)} in the grid"
+                      + (f", {pm(*everything)} over all frames" if everything else ""))  # fmt: skip
     gap = max((abs(b.population - b.surface_population) for b in result.basins), default=0.0)
     if gap > 0.05:
         err_console.print(

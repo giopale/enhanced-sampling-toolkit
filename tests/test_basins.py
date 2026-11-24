@@ -132,6 +132,20 @@ def test_named_regions_one_run_blocks(tmp_path):
     assert np.isfinite(result.basins[0].error)  # from the time blocks of the one run
     assert result.basins[0].averages["q"] == pytest.approx(0.6)
 
+    # shares of all frames: one run, so exactly the population in the grid scaled down by
+    # the reweighted share past the walls; everything adds up to 1
+    past, past_error = result.outside_population
+    assert 0 < past < 1 and np.isfinite(past_error)
+    for b in result.basins:
+        assert b.population_of_all == pytest.approx(b.population * (1 - past))
+        assert np.isfinite(b.error_of_all)
+    total = sum(b.population_of_all for b in result.basins) + result.unassigned_of_all + past
+    assert total == pytest.approx(1.0)
+    table = project.runs[0].load_cvs(["d0", "cn", "q"])
+    w = np.exp(table.bias / table.kbt - (table.bias / table.kbt).max())
+    expected = np.sum(w * table["q"]) / w.sum()  # <q> over every frame, OPES reweighted
+    assert result.totals_of_all["q"][0] == pytest.approx(expected)
+
     with pytest.raises(EstError, match="not CVs"):
         basin_populations(project, ["d0", "cn"], regions={"a": {"theta": (0, 1)}},
                           reweight_options=OPTIONS)  # fmt: skip
@@ -166,7 +180,10 @@ def test_file_and_plot(result, project, tmp_path):
         assert a.population == pytest.approx(b.population)
         assert a.averages["q"] == pytest.approx(b.averages["q"])
         assert a.run_populations == pytest.approx(b.run_populations)
+        assert a.population_of_all == pytest.approx(b.population_of_all)
     assert back.totals["q"][0] == pytest.approx(result.totals["q"][0])
+    assert back.totals_of_all["q"][0] == pytest.approx(result.totals_of_all["q"][0])
+    assert back.outside_population == pytest.approx(result.outside_population)
     assert back.grid == result.grid and back.metadata["mode"] == "automatic"
     labels = Surface.load(result.label_surface().save(tmp_path / "map.dat"))
     np.testing.assert_array_equal(labels.values, result.labels)
@@ -185,7 +202,8 @@ def test_command(project, monkeypatch):
     runner = CliRunner()
     out = runner.invoke(app, ["basins", "d0", "cn", "--quantity", "q", "--points", "81,41"])
     assert out.exit_code == 0, out.output
-    for text in ("population", "ΔF", "total <q>", "outside the grid limits", "<q>"):
+    for text in ("in the grid", "ΔF", "total <q>", "past the grid limits", "of all frames",
+                 "past the walls", "<q>"):  # fmt: skip
         assert text in out.output
     folder = root / "basins-d0-cn"
     for name in ("basins.dat", "basins-map.dat", "basins.png"):

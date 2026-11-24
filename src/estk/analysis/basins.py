@@ -11,8 +11,13 @@ the basin of its grid cell (or the named region it is in) and
 
     P_A = sum_{i in A} w_i / sum_i w_i,   w_i = exp(V_i / kT),
 
-over the frames inside the grid limits (the walls, as for the surfaces): frames past them are
-reported, not counted. The runs are combined like surfaces (``equal``: same weight per run;
+over the frames inside the grid limits (the walls, as for the surfaces). The same shares of
+*all* frames, past the walls too (``population_of_all``), are given as well, with the share
+past the walls as one more state: these are the populations in the ensemble of the
+simulation with its walls (the frames are reweighted for the OPES bias only; reweighting the
+walls away too is not reliable, as frames deep in a wall would dominate). Shares of all frames
+have the same denominator for every surface, so they can be compared between surfaces in
+different CVs. The runs are combined like surfaces (``equal``: same weight per run;
 ``probability``: by their total weight). The error is the standard error between runs, or
 between time blocks with one run. The populations integrated from the surface,
 ``sum_{cells in A} exp(-F/kT)``, are given as a check.
@@ -222,6 +227,9 @@ class Basin:
     surface_population: float  # integrated from the surface, as a check
     effective_frames: float  # Kish, summed over runs
     run_populations: dict[str, float] = field(default_factory=dict)
+    # share of all frames, past the walls too (the walls stay part of the system)
+    population_of_all: float = math.nan
+    error_of_all: float = math.nan
     averages: dict[str, float] = field(default_factory=dict)  # quantity -> <q> in the basin
     average_errors: dict[str, float] = field(default_factory=dict)
 
@@ -238,6 +246,11 @@ class BasinResult:
     outside_fraction: float = 0.0  # raw fraction of frames outside the grid limits
     totals: dict[str, tuple[float, float]] = field(default_factory=dict)  # q -> (<q>, error)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # of all frames: the reweighted share past the walls (value, error), the share in no
+    # region, and <q> over all frames
+    outside_population: tuple[float, float] = (math.nan, math.nan)
+    unassigned_of_all: float = math.nan
+    totals_of_all: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     @property
     def quantities(self) -> list[str]:
@@ -263,7 +276,7 @@ class BasinResult:
         path = Path(path)
         runs = list(self.basins[0].run_populations) if self.basins else []
         fields = ["basin", *self.names, "fes", "population", "error", "surface_population",
-                  "n_eff"]  # fmt: skip
+                  "n_eff", "population_of_all", "error_of_all"]  # fmt: skip
         for q in self.quantities:
             fields += [q, f"{q}.err"]
         fields += [f"population.{r}" for r in runs]
@@ -275,13 +288,16 @@ class BasinResult:
             "unassigned": self.unassigned,
             "outside_fraction": self.outside_fraction,
             "totals": {q: list(v) for q, v in self.totals.items()},
+            "outside_population": list(self.outside_population),
+            "unassigned_of_all": self.unassigned_of_all,
+            "totals_of_all": {q: list(v) for q, v in self.totals_of_all.items()},
             "grid": {"names": list(self.grid.names), "lower": list(self.grid.lower),
                      "upper": list(self.grid.upper), "points": list(self.grid.points)},
         }  # fmt: skip
         lines = [f"#! FIELDS {' '.join(fields)}", *metadata_lines(meta)]
         for b in self.basins:
             values = [*b.point, b.free_energy, b.population, b.error, b.surface_population,
-                      b.effective_frames]  # fmt: skip
+                      b.effective_frames, b.population_of_all, b.error_of_all]  # fmt: skip
             for q in self.quantities:
                 values += [b.averages.get(q, math.nan), b.average_errors.get(q, math.nan)]
             values += [b.run_populations.get(r, math.nan) for r in runs]
@@ -304,6 +320,11 @@ class BasinResult:
         grid = Grid(tuple(g["names"]), tuple(g["lower"]), tuple(g["upper"]), tuple(g["points"]))
         names = tuple(g["names"])
         totals = {q: (float(v[0]), float(v[1])) for q, v in meta.pop("totals").items()}
+        totals_of_all = {q: (float(v[0]), float(v[1]))
+                         for q, v in meta.pop("totals_of_all", {}).items()}  # fmt: skip
+        outside_population = tuple(float(v) for v in meta.pop("outside_population",
+                                                              [math.nan, math.nan]))  # fmt: skip
+        unassigned_of_all = float(meta.pop("unassigned_of_all", math.nan))
         basins = []
         with open_text(path) as handle:
             for line in handle:
@@ -319,6 +340,8 @@ class BasinResult:
                     error=row["error"],
                     surface_population=row["surface_population"],
                     effective_frames=row["n_eff"],
+                    population_of_all=row.get("population_of_all", math.nan),
+                    error_of_all=row.get("error_of_all", math.nan),
                     run_populations={f[11:]: row[f] for f in fields if f.startswith("population.")},
                     averages={q: row[q] for q in totals},
                     average_errors={q: row[f"{q}.err"] for q in totals},
@@ -329,6 +352,8 @@ class BasinResult:
             grid=grid, units=meta.pop("units"), kbt=float(meta.pop("kbt")),
             unassigned=float(meta.pop("unassigned")),
             outside_fraction=float(meta.pop("outside_fraction")), totals=totals, metadata=meta,
+            outside_population=outside_population,  # type: ignore[arg-type]
+            unassigned_of_all=unassigned_of_all, totals_of_all=totals_of_all,
         )  # fmt: skip
 
 
@@ -343,12 +368,28 @@ class _RunEstimate:
     averages: dict[str, np.ndarray]  # q -> (basins,)
     totals: dict[str, float]  # q -> <q> over all frames inside the grid
     outside: float  # raw fraction of frames outside the grid
+    # of all frames, past the walls too: (basins + 2,): basins, unassigned, past the walls
+    of_all: np.ndarray = field(default_factory=lambda: np.empty(0))
+    log_all: float = -math.inf  # log of the total weight of all frames
+    totals_all: dict[str, float] = field(default_factory=dict)  # q -> <q> over all frames
 
 
 def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndarray],
               n_basins: int) -> _RunEstimate:  # fmt: skip
     inside = labels != OUTSIDE
     outside = 1.0 - float(inside.mean()) if len(labels) else math.nan
+    # shares of all frames (past the walls too, with the OPES weights only)
+    of_all = np.full(n_basins + 2, math.nan)
+    log_all, totals_all = -math.inf, {q: math.nan for q in values}
+    if len(labels):
+        w_all = np.exp(logw - logw.max())
+        all_total = float(w_all.sum())
+        log_all = float(logw.max()) + math.log(all_total)
+        for k in range(n_basins):
+            of_all[k] = w_all[labels == k].sum() / all_total
+        of_all[n_basins] = w_all[labels == NO_DATA].sum() / all_total
+        of_all[n_basins + 1] = w_all[~inside].sum() / all_total
+        totals_all = {q: float(np.sum(w_all * v) / all_total) for q, v in values.items()}
     lab, lw = labels[inside], logw[inside]
     if not len(lab):
         nan = np.full(n_basins, math.nan)
@@ -359,6 +400,9 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
             averages={q: nan for q in values},
             totals={q: math.nan for q in values},
             outside=outside,
+            of_all=of_all,
+            log_all=log_all,
+            totals_all=totals_all,
         )
     peak = float(lw.max())
     w = np.exp(lw - peak)
@@ -377,7 +421,7 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
     populations[n_basins] = w[lab == NO_DATA].sum() / total
     totals = {q: float(np.sum(w * v[inside]) / total) for q, v in values.items()}
     return _RunEstimate(populations, peak + math.log(total), effective, averages, totals,
-                        outside)  # fmt: skip
+                        outside, of_all, log_all, totals_all)  # fmt: skip
 
 
 def _standard_error(values: np.ndarray) -> float:
@@ -473,6 +517,14 @@ def basin_populations(
         weights = np.full(len(runs), 1.0 / len(runs))
     table_p = np.array([estimates[r].populations for r in runs])  # (runs, basins + 1)
     populations = weights @ table_p
+    # shares of all frames: the runs weighted by their total weight over all frames
+    if combine == "probability":
+        log_all = np.array([estimates[r].log_all for r in runs])
+        weights_all = np.exp(log_all - logsumexp(log_all))
+    else:
+        weights_all = weights
+    table_all = np.array([estimates[r].of_all for r in runs])  # (runs, basins + 2)
+    of_all = weights_all @ table_all
 
     def spread(per_run: np.ndarray, per_block: list[np.ndarray] | None) -> float:
         if len(runs) > 1:
@@ -508,6 +560,10 @@ def basin_populations(
             population=float(populations[k]),
             error=spread(table_p[:, k],
                          [b.populations[k] for b in blocks_of_first] if blocks_of_first else None),
+            population_of_all=float(of_all[k]),
+            error_of_all=spread(
+                table_all[:, k], [b.of_all[k] for b in blocks_of_first] if blocks_of_first else None
+            ),
             surface_population=float(density[cells].sum() / density.sum()),
             effective_frames=float(sum(estimates[r].effective[k] for r in runs)),
             run_populations={r: float(table_p[i, k]) for i, r in enumerate(runs)},
@@ -520,6 +576,18 @@ def basin_populations(
         totals[q] = (float(weights @ per_run),
                      spread(per_run, [b.totals[q] for b in blocks_of_first]
                             if blocks_of_first else None))  # fmt: skip
+    totals_all = {}
+    for q in quantities:
+        per_run = np.array([estimates[r].totals_all[q] for r in runs])
+        totals_all[q] = (float(weights_all @ per_run),
+                         spread(per_run, [b.totals_all[q] for b in blocks_of_first]
+                                if blocks_of_first else None))  # fmt: skip
+    past = n + 1
+    outside_population = (
+        float(of_all[past]),
+        spread(table_all[:, past], [b.of_all[past] for b in blocks_of_first]
+               if blocks_of_first else None),
+    )  # fmt: skip
     outside = float(np.mean([estimates[r].outside for r in runs]))
     for b in basins:
         if b.effective_frames < 10 and b.population > 0:
@@ -540,5 +608,6 @@ def basin_populations(
     return BasinResult(
         names=tuple(cvs), basins=basins, labels=labels, grid=grid, units=surface.units, kbt=kbt,
         unassigned=float(populations[n]), outside_fraction=outside, totals=totals,
-        metadata=metadata,
+        metadata=metadata, outside_population=outside_population,
+        unassigned_of_all=float(of_all[n]), totals_of_all=totals_all,
     )  # fmt: skip

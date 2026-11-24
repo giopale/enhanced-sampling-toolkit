@@ -423,11 +423,24 @@ total <covO2c> = 0.026 ± 0.003
   the most populated basin.
   - **surface:** the same populations integrated from the surface, as a check. estk warns if
     they differ by more than 0.05.
-- **Walls.**
-  - Only frames inside the grid limits count; those default to the PLUMED walls, as for the
-    surfaces.
-  - The populations are the equilibrium ones within the region the walls allow.
-  - Frames past the walls are reported, but not counted.
+- **Two normalisations.**
+  - **in the grid:** shares of the frames inside the grid limits, which default to the PLUMED
+    walls. These are the populations within the region the walls allow, and they match the
+    surface.
+  - **of all frames:** shares of every frame, including those past the walls, which get their
+    own row, "past the walls".
+    - This is the ensemble of the simulation *with* its walls: frames are reweighted for the
+      OPES bias only.
+    - Removing the walls too isn't reliable. Frames deep in a wall would get enormous weights,
+      e.g. the cn = 0 frames at 84 kT.
+    - The basins plus "past the walls" add up to 1.
+  - **Raw vs reweighted past the walls.** The share of *frames* past the walls is usually much
+    larger than their reweighted share. OPES spends time at high free energy, so the raw
+    percentage isn't the probability you're missing.
+  - **Comparing surfaces.** Use "of all frames" to compare populations between surfaces in
+    different CVs, e.g. d0/cn and the proton-transfer CVs. Every surface's grid excludes
+    different frames, but "of all frames" always has the same denominator: every frame in the
+    time window. No common mask is needed.
 - **Errors.**
   - With several runs: the standard error between runs, combined like the surfaces
     (`--combine`).
