@@ -441,6 +441,16 @@ total <covO2c> = 0.026 ± 0.003
     different CVs, e.g. d0/cn and the proton-transfer CVs. Every surface's grid excludes
     different frames, but "of all frames" always has the same denominator: every frame in the
     time window. No common mask is needed.
+  - **Frames where a CV is undefined.** Proton-transfer CVs are NaN when there is no
+    hydrogen-bond chain. Such frames can't be in the grid, but they are part of all frames,
+    so they get their own row, "CV undefined", with their reweighted share.
+    - Within the grid, the populations of a proton-transfer surface are conditional on a
+      chain existing.
+    - The "of all frames" column is not conditional, and can be compared with d0/cn.
+  - **Frame counts differ between surfaces.** CVs computed from the dumps exist only at dump
+    frames, so those analyses use fewer frames than d0/cn, which uses every COLVAR row. A
+    regular subsample in time estimates the same populations. The line `frames:` gives the
+    number used.
 - **Errors.**
   - With several runs: the standard error between runs, combined like the surfaces
     (`--combine`).

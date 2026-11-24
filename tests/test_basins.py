@@ -235,3 +235,35 @@ def test_config_regions_of_other_surfaces_are_skipped(project, tmp_path):
     assert [b.name for b in result.basins] == ["left"]
     forced = basin_populations(mixed, ["d0", "cn"], automatic=True, reweight_options=OPTIONS)
     assert forced.metadata["mode"] == "automatic"
+
+
+def test_frames_with_an_undefined_cv(tmp_path):
+    """A CV that is NaN on some frames (a proton-transfer CV without a chain): those frames
+    are not in the grid, but they are part of all frames, as their own state."""
+    write_tilted(tmp_path / "r0", 0)
+    rng = np.random.default_rng(5)
+    colvar = np.loadtxt(tmp_path / "r0" / "COLVAR", comments="#")
+    x = colvar[:, 1]
+    undefined = rng.random(len(x)) < np.where(x < 2.0, 0.1, 0.4)  # more often on the right
+    pt = np.where(undefined, np.nan, x + 0.01 * rng.standard_normal(len(x)))
+    np.savetxt(tmp_path / "r0" / "CV-pt", np.column_stack([colvar[:, 0], pt]), fmt="%.8f",
+               header="FIELDS time pt", comments="#! ")  # fmt: skip
+    (tmp_path / "estk.yaml").write_text(
+        CONFIG.format(pattern="r*") + "  pt:\n    bandwidth: 0.03\n"
+    )
+    project = Project(tmp_path / "estk.yaml")
+    surface = project.reweight(["pt", "cn"], points=(81, 41), limits={"pt": (1.5, 2.5)}).combined
+    result = basin_populations(project, ["pt", "cn"], surface=surface, blocks=4)
+    assert result.undefined_fraction == pytest.approx(np.mean(undefined), abs=0.02)
+    gone, error = result.undefined_population
+    assert 0 < gone < 1 and np.isfinite(error)
+    total = (sum(b.population_of_all for b in result.basins) + result.unassigned_of_all
+             + result.outside_population[0] + gone)  # fmt: skip
+    assert total == pytest.approx(1.0)
+    # in the grid: as if the undefined frames had been dropped
+    assert sum(b.population for b in result.basins) + result.unassigned == pytest.approx(1.0)
+    # the share of the undefined frames, reweighted, by hand
+    t = project.runs[0].load_cvs(["pt", "cn"], drop_nan=False)
+    w = np.exp(t.bias / t.kbt - (t.bias / t.kbt).max())
+    assert gone == pytest.approx(w[np.isnan(t["pt"])].sum() / w.sum())
+    assert result.metadata["frames"] == len(t)

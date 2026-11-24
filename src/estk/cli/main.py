@@ -861,6 +861,12 @@ def basins(
         "past the walls", *empty, "", "", "", "", pm(past, past_err, ".4f"), "",
         *["" for _ in result.quantities], style="dim",
     )  # fmt: skip
+    if result.undefined_fraction > 0:
+        gone, gone_err = result.undefined_population
+        table.add_row(
+            "CV undefined", *empty, "", "", "", "", pm(gone, gone_err, ".4f"), "",
+            *["" for _ in result.quantities], style="dim",
+        )  # fmt: skip
     console.print(table)
     kind = "runs" if len(result.metadata["runs"]) > 1 else "time blocks"
     console.print(
@@ -872,8 +878,14 @@ def basins(
     if result.metadata["mode"] == "regions":
         console.print(f"in no region: {result.unassigned:.4f} in the grid, "
                       f"{result.unassigned_of_all:.4f} of all frames")  # fmt: skip
+    console.print(f"frames: {result.metadata['frames']} in the time window, all runs")
     console.print(f"past the grid limits (walls): {100 * result.outside_fraction:.1f} % of the "
                   f"frames, {100 * past:.1f} % of the reweighted population")  # fmt: skip
+    if result.undefined_fraction > 0:
+        console.print(f"{', '.join(names)} undefined (NaN, e.g. no proton-transfer chain): "
+                      f"{100 * result.undefined_fraction:.1f} % of the frames, "
+                      f"{100 * result.undefined_population[0]:.1f} % of the reweighted population "
+                      "(in 'of all frames', not in the grid)")  # fmt: skip
     for q, (value, e) in result.totals.items():
         everything = result.totals_of_all.get(q)
         console.print(f"total <{q}> = {pm(value, e)} in the grid"

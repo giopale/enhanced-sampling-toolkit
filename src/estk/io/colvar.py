@@ -207,6 +207,7 @@ def load_cv_table(
     filters: Mapping[str, tuple[float | None, float | None]] | None = None,
     bias: bool = True,
     include_walls: bool = False,
+    drop_nan: bool = True,
 ) -> CVTable:
     """Load the CVs of one run, joined on time.
 
@@ -232,6 +233,9 @@ def load_cv_table(
         Add the energy of the PLUMED walls to the bias. It is computed from the wall
         definitions (AT, KAPPA, EXP, EPS, OFFSET) and the values of the walled CVs, which are
         loaded for this purpose if needed.
+    drop_nan:
+        Drop rows where a loaded value is NaN (e.g. a proton-transfer CV without a chain; they
+        are counted in ``report.nan``). With False they are kept, NaN.
 
     The frames past each wall of a loaded CV are counted in ``report.walls`` in any case.
 
@@ -239,7 +243,7 @@ def load_cv_table(
     ``model_devi.<i>.out``, ...) and pools the rows; ``walker`` then gives each row's walker.
     """
     options = dict(time=time, extra=extra, filters=filters, bias=bias,
-                   include_walls=include_walls)  # fmt: skip
+                   include_walls=include_walls, drop_nan=drop_nan)  # fmt: skip
     parts = [_load_walker(run, walker, cvs, **options) for walker in run.walker_ids]
     if len(parts) == 1:
         table = parts[0]
@@ -293,6 +297,7 @@ def _load_walker(
     filters: Mapping[str, tuple[float | None, float | None]] | None,
     bias: bool,
     include_walls: bool,
+    drop_nan: bool = True,
 ) -> CVTable:
     """``load_cv_table`` for one walker's files (or the run's, ``walker=None``); may be empty."""
     meta = run.metadata
@@ -421,7 +426,8 @@ def _load_walker(
         bad = keep & np.isnan(values)
         if bad.any():
             report.nan[name] = int(np.count_nonzero(bad))
-            keep &= ~bad
+            if drop_nan:
+                keep &= ~bad
     for name, (lo, hi) in (filters or {}).items():
         inside = np.ones_like(keep)
         if lo is not None:
@@ -437,7 +443,7 @@ def _load_walker(
         energy = wall_energy[name]
         max_kbt = None
         if energy is not None and kbt is not None and n_past:
-            max_kbt = float(np.max(energy[keep])) / kbt
+            max_kbt = float(np.nanmax(energy[keep])) / kbt
         report.walls[name] = (n_past, max_kbt)
 
     for name in hidden:

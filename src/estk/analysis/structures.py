@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from estk.analysis.basins import OUTSIDE, BasinDefinition, Region, define_basins
+from estk.analysis.basins import NO_DATA, BasinDefinition, Region, define_basins
 from estk.errors import EstError
 from estk.io.lammpstrj import Frame, dump_columns, iter_frames, scan_steps
 from estk.io.plumed import walker_file
@@ -174,7 +174,7 @@ def sample_basins(
             raise EstError(f"{run.name}: no bias or temperature; cannot weight the frames")
         labels = definition.frame_labels(table.array(cvs))
         logw = table.bias / table.kbt
-        inside = labels != OUTSIDE
+        inside = labels >= NO_DATA  # in the grid, CVs defined
         if not inside.any():
             continue
         log_total = logsumexp(logw[inside])

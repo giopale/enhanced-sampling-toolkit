@@ -169,6 +169,7 @@ class Run:
         filters: Mapping[str, tuple[float | None, float | None]] | None = None,
         bias: bool = True,
         include_walls: bool = False,
+        drop_nan: bool = True,
     ) -> CVTable:
         """Load CVs joined on time, all walkers pooled; see ``estk.io.colvar.load_cv_table``."""
         return load_cv_table(
@@ -179,6 +180,7 @@ class Run:
             filters=filters,
             bias=bias,
             include_walls=include_walls,
+            drop_nan=drop_nan,
         )
 
     def __repr__(self) -> str:
