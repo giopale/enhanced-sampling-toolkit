@@ -522,6 +522,13 @@ estk average cnS1 cnS2 cnS3 cnS4 cnS5 cnS6 --time 1 inf \
   - The bars are coloured by `--group`, in the order given, with a gap between groups.
   - Each run's value is drawn as a dot; `--no-runs` hides them.
   - `--label` renames the bars.
+- **Combined bars** come last, after a gap, in grey.
+  - `--total` adds `all`, the mean of all the bars: the protonated fraction of all the sites
+    together.
+  - `--mean B=cnO2cB1,cnO2cB2` adds the combined fraction of some sites, e.g. per type.
+  - `--sum NAME=...` adds a sum instead, e.g. the number of protonated sites.
+  - They are combined run by run, so their error bars include the correlations between the
+    sites; they are not the individual errors added up.
 - **Data (`sites.dat`)** is reloaded with `estk.analysis.AverageResult.load`. To restyle the
   chart, call `estk.plotting.plot_averages` on it.
 - **The ensemble** is the simulation with its walls: the OPES bias is reweighted away, the

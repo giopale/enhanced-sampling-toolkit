@@ -101,12 +101,18 @@ def ensemble_averages(
     time: tuple[float | None, float | None] | None = None,
     blocks: int = 1,
     combine: str = "equal",
+    sums: Mapping[str, Sequence[str]] | None = None,
+    means: Mapping[str, Sequence[str]] | None = None,
 ) -> AverageResult:
     """Reweighted average of each quantity over all frames of every run, runs combined.
 
     ``quantities`` are loaded like CVs (COLVAR, ``CV-<name>``, ``cv.<name>.source``) or from
     ``sources`` (``{quantity: file}``). ``blocks``: time blocks per run, for the error bar when
-    there is only one run.
+    there is only one run. ``sums`` (``{name: [quantity, ...]}``, e.g. ``{"total": [...]}``)
+    adds the sum of some quantities as one more quantity: summed run by run (and block by
+    block), so its error comes from the spread of the sums and includes the correlations
+    between the quantities. ``means`` likewise adds their mean, e.g. the protonated fraction
+    of several sites together.
     """
     quantities = list(dict.fromkeys(quantities))
     if not quantities:
@@ -115,6 +121,18 @@ def ensemble_averages(
         raise EstError(f"combine must be equal or probability, got '{combine}'")
     if blocks < 1:
         raise EstError(f"blocks must be at least 1, got {blocks}")
+    sums = {name: list(members) for name, members in (sums or {}).items()}
+    means = {name: list(members) for name, members in (means or {}).items()}
+    if set(sums) & set(means):
+        raise EstError(f"{', '.join(set(sums) & set(means))}: both a sum and a mean")
+    for kind, combined in (("sum", sums), ("mean", means)):
+        for name, members in combined.items():
+            if name in quantities:
+                raise EstError(f"{kind} '{name}' has the name of a quantity")
+            unknown = [m for m in members if m not in quantities]
+            if unknown or not members:
+                raise EstError(f"{kind} '{name}': {', '.join(unknown) or 'no quantities'} "
+                               "not averaged")  # fmt: skip
     extra = {q: f for q, f in (sources or {}).items() if q in quantities}
     loaded = [q for q in quantities if q not in extra]
     per_run: dict[str, dict[str, float]] = {}
@@ -145,6 +163,12 @@ def ensemble_averages(
                                   for q in quantities})  # fmt: skip
     if not per_run:
         raise EstError("no runs found")
+    # sums and means of the averages, run by run and block by block
+    for name, members in [*sums.items(), *means.items()]:
+        for averages in [*per_run.values(), *per_block]:
+            total = float(sum(averages[m] for m in members))
+            averages[name] = total if name in sums else total / len(members)
+    quantities = [*quantities, *sums, *means]
     runs = list(per_run)
     if combine == "probability":
         totals = np.array(log_totals)
@@ -168,6 +192,8 @@ def ensemble_averages(
         "blocks": blocks,
         "frames": frames,
         "error": "between runs" if len(runs) > 1 else ("between blocks" if per_block else None),
+        "sums": sums,
+        "means": means,
     }
     selection = project.config.active_selection
     if selection is not None:

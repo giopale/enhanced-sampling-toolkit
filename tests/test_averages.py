@@ -126,3 +126,56 @@ def test_command(project, monkeypatch):
     assert (root / "sites.png").is_file() and (root / "sites.dat").is_file()
     out = runner.invoke(app, ["average", "s1", "--group", "oops"])
     assert out.exit_code == 1 and "--group" in out.output
+
+
+def test_sums(project, tmp_path):
+    sums = {"total": SITES, "pair": ["s1", "s2"]}
+    result = ensemble_averages(project, SITES, sums=sums)
+    assert result.quantities == [*SITES, "total", "pair"]
+    for run, values in result.runs.items():
+        assert values["total"] == pytest.approx(sum(values[q] for q in SITES)), run
+    assert result.values["total"] == pytest.approx(sum(result.values[q] for q in SITES))
+    per_run = [result.runs[r]["total"] for r in result.runs]
+    assert result.errors["total"] == pytest.approx(np.std(per_run, ddof=1) / np.sqrt(3))
+    back = AverageResult.load(result.save(tmp_path / "s.dat"))
+    assert back.metadata["sums"] == sums and back.values == pytest.approx(result.values)
+
+    groups = {"bridging": ["s1", "s2"], "terminal": ["s3"]}
+    ax = plot_averages(back, groups=groups)
+    assert [t.get_text() for t in ax.get_xticklabels()] == [*SITES, "total", "pair"]
+    bars = ax.patches[:5]
+    assert to_hex(bars[3].get_facecolor()) == to_hex(bars[4].get_facecolor()) != SERIES[1]
+    assert [t.get_text() for t in ax.get_legend().get_texts()] == ["bridging", "terminal"]
+    hidden = plot_averages(back, groups=groups, sums=False)
+    assert [t.get_text() for t in hidden.get_xticklabels()] == SITES
+    plain = plot_averages(back)  # no groups: the quantities, then the sums
+    assert [t.get_text() for t in plain.get_xticklabels()] == [*SITES, "total", "pair"]
+
+    mean = ensemble_averages(project, SITES, means={"all": SITES})
+    per_run = [mean.runs[r]["all"] for r in mean.runs]
+    assert mean.values["all"] == pytest.approx(np.mean([mean.values[q] for q in SITES]))
+    assert mean.errors["all"] == pytest.approx(np.std(per_run, ddof=1) / np.sqrt(3))
+    assert plot_averages(mean).get_xticklabels()[-1].get_text() == "all"
+    with pytest.raises(EstError, match="both a sum and a mean"):
+        ensemble_averages(project, SITES, sums={"x": SITES}, means={"x": SITES})
+    with pytest.raises(EstError, match="name of a quantity"):
+        ensemble_averages(project, SITES, sums={"s1": ["s2"]})
+    with pytest.raises(EstError, match="not averaged"):
+        ensemble_averages(project, ["s1"], sums={"x": ["s2"]})
+
+
+def test_total_command(project, monkeypatch):
+    monkeypatch.chdir(project.config.path.parent)
+    out = CliRunner().invoke(app, ["average", "s1", "s2", "s3", "--total", "--sum",
+                                   "pair=s1,s2", "-o", "t.png"])  # fmt: skip
+    assert out.exit_code == 0, out.output
+    saved = AverageResult.load(project.config.path.parent / "t.dat")
+    assert saved.metadata["sums"] == {"pair": ["s1", "s2"]}
+    assert saved.metadata["means"] == {"all": ["s1", "s2", "s3"]}  # the fraction of all sites
+    assert saved.values["all"] == pytest.approx(np.mean([saved.values[q] for q in SITES]))
+    out = CliRunner().invoke(app, ["average", "s1", "s2", "--mean", "both=s1,s2", "-o", "m.png"])
+    assert out.exit_code == 0, out.output
+    both = AverageResult.load(project.config.path.parent / "m.dat")
+    assert both.values["both"] == pytest.approx((both.values["s1"] + both.values["s2"]) / 2)
+    out = CliRunner().invoke(app, ["average", "s1", "--sum", "oops"])
+    assert out.exit_code == 1 and "--sum" in out.output

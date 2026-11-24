@@ -967,6 +967,29 @@ def average(
         list[str] | None, typer.Option(help="Name of a quantity on the chart, e.g. cnS1=S1.")
     ] = None,
     ylabel: Annotated[str, typer.Option(help="y-axis label of the chart.")] = "average",
+    total: Annotated[
+        bool,
+        typer.Option(
+            "--total",
+            help="Add an 'all' bar: the mean of all the bars (e.g. the protonated fraction of "
+            "all the sites together), with its own error bar.",
+        ),
+    ] = False,
+    mean: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--mean",
+            help="Add the mean of some quantities as a bar, e.g. B=cnO2cB1,cnO2cB2: the "
+            "fraction of those sites together (repeat).",
+        ),
+    ] = None,
+    sum_: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--sum",
+            help="Add the sum of some quantities as a bar, e.g. B=cnO2cB1,cnO2cB2 (repeat).",
+        ),
+    ] = None,
     source: Annotated[
         list[str] | None,
         typer.Option(help="File of a quantity not in COLVAR/CV-<name>, e.g. q=file (repeat)."),
@@ -1017,11 +1040,33 @@ def average(
             raise EstError(f"--label: expected e.g. cnS1=S1, got {item!r}")
         names[name] = text
     wanted = list(dict.fromkeys([*quantities, *(q for m in groups.values() for q in m)]))
+    sums: dict[str, list[str]] = {}
+    for item in sum_ or []:
+        name, sep, members = item.partition("=")
+        listed = [m.strip() for m in members.split(",") if m.strip()]
+        if not sep or not name or not listed:
+            raise EstError(f"--sum: expected e.g. B=cnO2cB1,cnO2cB2, got {item!r}")
+        sums[name] = listed
+        wanted += [m for m in listed if m not in wanted]
+    means: dict[str, list[str]] = {}
+    for item in mean or []:
+        name, sep, members = item.partition("=")
+        listed = [m.strip() for m in members.split(",") if m.strip()]
+        if not sep or not name or not listed:
+            raise EstError(f"--mean: expected e.g. B=cnO2cB1,cnO2cB2, got {item!r}")
+        means[name] = listed
+        wanted += [m for m in listed if m not in wanted]
+    if total:
+        plotted = [q for m in groups.values() for q in m] if groups else list(quantities)
+        means["all"] = list(dict.fromkeys(plotted))
     result = ensemble_averages(Project(config), wanted, sources=sources, time=time,
-                               blocks=blocks, combine=combine.lower())  # fmt: skip
+                               blocks=blocks, combine=combine.lower(), sums=sums,
+                               means=means)  # fmt: skip
 
     table = Table("quantity", "group", "average", "error", *result.runs)
     group_of = {q: g for g, members in groups.items() for q in members}
+    group_of.update({name: "sum of " + ", ".join(m) for name, m in sums.items()})
+    group_of.update({name: "mean of " + ", ".join(m) for name, m in means.items()})
     for q in result.quantities:
         table.add_row(q, group_of.get(q, ""), f"{result.values[q]:.4g}",
                       f"{result.errors[q]:.2g}" if np.isfinite(result.errors[q]) else "-",

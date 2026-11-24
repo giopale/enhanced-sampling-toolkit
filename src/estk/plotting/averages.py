@@ -12,6 +12,8 @@ from estk.errors import EstError
 from estk.plotting.core import INK, INK_MUTED, INK_SECONDARY, SERIES, axis_label
 
 GROUP_GAP = 0.6  # extra space between groups, in bar slots
+SUM = "__sum__"  # the "group" of sums (totals): last, after a gap
+SUM_COLOR = "#a3a19b"  # sums are neutral: not one of the groups
 
 
 def plot_averages(
@@ -23,6 +25,7 @@ def plot_averages(
     labels: Mapping[str, str] | None = None,
     ylabel: str = "average",
     runs: bool = True,
+    sums: bool = True,
 ) -> Axes:
     """One bar per quantity: the combined average, with its error bar (standard error between
     runs or blocks) and, with ``runs`` and several runs, each run's own average as a dot.
@@ -30,12 +33,18 @@ def plot_averages(
     ``groups`` (``{type: [quantity, ...]}``, e.g. site types) colours the bars by group, in the
     fixed series order, and leaves a gap between groups; the legend names the groups.
     ``labels`` renames quantities on the x axis (default: ``cv.<name>.label`` style names).
+    With ``sums``, the sums and means of the result (``ensemble_averages(sums=..., means=...)``,
+    e.g. the fraction of all sites together) come last, after a gap, in grey.
     """
     import matplotlib.pyplot as plt
 
     if ax is None:
         _, ax = plt.subplots()
     available = list(result.quantities)  # type: ignore[attr-defined]
+    meta = result.metadata or {}  # type: ignore[attr-defined]
+    summed = [*(meta.get("sums") or {}), *(meta.get("means") or {})]
+    if not sums:
+        available = [q for q in available if q not in summed]
     if groups:
         order = [q for members in groups.values() for q in members]
         missing = [q for q in order if q not in available]
@@ -46,12 +55,18 @@ def plot_averages(
         if len(groups) > len(SERIES):
             raise EstError(f"at most {len(SERIES)} groups (one colour each)")
         group_of = {q: g for g, members in groups.items() for q in members}
+        if sums:
+            order += [q for q in summed if q not in order]
+            group_of.update({q: SUM for q in summed})
     else:
-        order = list(quantities) if quantities else available
+        if quantities:
+            order = list(quantities) + ([q for q in summed if q not in quantities] if sums else [])
+        else:
+            order = [q for q in available if q not in summed] + (summed if sums else [])
         missing = [q for q in order if q not in available]
         if missing:
             raise EstError(f"not in the averages: {', '.join(missing)}")
-        group_of = {q: None for q in order}
+        group_of = {q: SUM if q in summed else None for q in order}
     if not order:
         raise EstError("no quantities to plot")
 
@@ -64,7 +79,11 @@ def plot_averages(
         position += 1.0
     x = np.array(slots)
     names = list(groups) if groups else []
-    colors = [SERIES[names.index(group_of[q])] if groups else SERIES[0] for q in order]
+    colors = [
+        SUM_COLOR if group_of[q] == SUM else SERIES[names.index(group_of[q])] if groups
+        else SERIES[0]
+        for q in order
+    ]  # fmt: skip
     values = np.array([result.values[q] for q in order])  # type: ignore[attr-defined]
     errors = np.array([result.errors[q] for q in order])  # type: ignore[attr-defined]
 
