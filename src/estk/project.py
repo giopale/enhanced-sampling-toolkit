@@ -18,6 +18,7 @@ from estk.logging import get_logger
 
 if TYPE_CHECKING:
     from estk.reweight import ReweightResult
+    from estk.selection import Selection
 
 log = get_logger(__name__)
 
@@ -170,6 +171,8 @@ class Run:
         bias: bool = True,
         include_walls: bool = False,
         drop_nan: bool = True,
+        select: Selection | bool | None = True,
+        drop_deselected: bool = True,
     ) -> CVTable:
         """Load CVs joined on time, all walkers pooled; see ``estk.io.colvar.load_cv_table``."""
         return load_cv_table(
@@ -181,6 +184,8 @@ class Run:
             bias=bias,
             include_walls=include_walls,
             drop_nan=drop_nan,
+            select=select,
+            drop_deselected=drop_deselected,
         )
 
     def __repr__(self) -> str:

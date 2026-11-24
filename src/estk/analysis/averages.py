@@ -6,6 +6,9 @@ or ``probability`` (by each run's total weight). Frames where a quantity is NaN 
 of that quantity's average only. The error is the standard error between runs, or between
 time blocks when there is one run.
 
+With a selection (``--select``), the averages are over the selected frames: averages
+conditional on the selection; the selected share of the (reweighted) population is reported.
+
 For a site's coordination number (the number of protons on it), the average is the site's
 equilibrium occupation, e.g. its protonated fraction.
 """
@@ -116,12 +119,21 @@ def ensemble_averages(
     loaded = [q for q in quantities if q not in extra]
     per_run: dict[str, dict[str, float]] = {}
     per_block: list[dict[str, float]] = []
-    log_totals, frames = [], 0
+    log_totals, frames, shares, raw_shares = [], 0, [], []
     for run in project.runs:
-        table = run.load_cvs(loaded, time=time, extra=extra or None, drop_nan=False)
+        table = run.load_cvs(loaded, time=time, extra=extra or None, drop_nan=False,
+                             drop_deselected=False)  # fmt: skip
         if table.bias is None or table.kbt is None:
             raise EstError(f"{run.name}: no bias or temperature; cannot weight the frames")
         logw = table.bias / table.kbt
+        if table.selected is not None:  # the share of the selection, then only its frames
+            w_all = np.exp(logw - logw.max())
+            shares.append(float(w_all[table.selected].sum() / w_all.sum()))
+            raw_shares.append(float(np.mean(table.selected)))
+            table = table.select(table.selected)
+            logw = table.bias / table.kbt
+            if not len(table):
+                raise EstError(f"{run.name}: no frame is selected")
         w = np.exp(logw - logw.max())
         log_totals.append(float(logsumexp(logw)))
         frames += len(table)
@@ -157,4 +169,9 @@ def ensemble_averages(
         "frames": frames,
         "error": "between runs" if len(runs) > 1 else ("between blocks" if per_block else None),
     }
+    selection = project.config.active_selection
+    if selection is not None:
+        metadata["selection"] = selection.describe()
+        metadata["selected_share"] = [float(np.mean(shares)), _standard_error(shares)]
+        metadata["selected_frames"] = float(np.mean(raw_shares))
     return AverageResult(quantities, values, errors, per_run, metadata)

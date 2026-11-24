@@ -320,6 +320,7 @@ def reweight(
                 "temperature": meta.temperature,
                 "time_window_ns": list(time) if time else None,
                 **({"block_of": parents[name]} if blocks > 1 else {}),
+                **_selection_meta(project),
             },
         )
 
@@ -378,6 +379,12 @@ def coarse_grid_messages(grid: Grid, surfaces: Mapping[str, Surface]) -> list[st
             f"use about {needed} points along {name} (spacing h/2)"
         )
     return messages
+
+
+def _selection_meta(project: Project) -> dict[str, str]:
+    """``{"selection": ...}`` when the frames are restricted by ``--select``."""
+    selection = project.config.active_selection
+    return {"selection": selection.describe()} if selection is not None else {}
 
 
 def _reweight_job(args: dict[str, Any]) -> Surface:

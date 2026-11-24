@@ -190,6 +190,11 @@ def averages_along_path(
         "bandwidth": used_bandwidths,
         "time_window_ns": list(time) if time else None,
         "walls_in_bias": include_walls,
+        **(
+            {"selection": project.config.active_selection.describe()}
+            if project.config.active_selection is not None
+            else {}
+        ),  # fmt: skip
         "blocks": blocks,
         **{k: path.metadata[k] for k in ("temperature", "ends") if k in path.metadata},
     }

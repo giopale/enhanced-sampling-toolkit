@@ -21,6 +21,7 @@ from estk.logging import get_logger
 if TYPE_CHECKING:
     from estk.config import ProjectConfig
     from estk.project import Run
+    from estk.selection import Selection
 
 log = get_logger(__name__)
 
@@ -117,6 +118,7 @@ class LoadReport:
     outside_time: int = 0
     nan: dict[str, int] = field(default_factory=dict)  # column -> rows dropped for NaN
     filtered: int = 0
+    deselected: int = 0  # rows left out by the selection
     rows: int = 0
     # "<cv> upper/lower <AT>" -> (frames past the wall, largest wall energy in k_BT or None)
     walls: dict[str, tuple[int, float | None]] = field(default_factory=dict)
@@ -146,6 +148,8 @@ class LoadReport:
             parts.append(f"{n} NaN in {name}")
         if self.filtered:
             parts.append(f"{self.filtered} filtered out")
+        if self.deselected:
+            parts.append(f"{self.deselected} not selected")
         return ", ".join(parts)
 
 
@@ -165,6 +169,8 @@ class CVTable:
     energy_units: str = "kj/mol"
     report: LoadReport = field(default_factory=LoadReport)
     walker: np.ndarray | None = None
+    # with load_cv_table(..., drop_deselected=False): which rows the selection keeps
+    selected: np.ndarray | None = None
 
     def __len__(self) -> int:
         return len(self.time)
@@ -195,6 +201,7 @@ class CVTable:
             energy_units=self.energy_units,
             report=self.report,
             walker=self.walker[rows] if self.walker is not None else None,
+            selected=self.selected[rows] if self.selected is not None else None,
         )
 
 
@@ -208,6 +215,8 @@ def load_cv_table(
     bias: bool = True,
     include_walls: bool = False,
     drop_nan: bool = True,
+    select: Selection | bool | None = True,
+    drop_deselected: bool = True,
 ) -> CVTable:
     """Load the CVs of one run, joined on time.
 
@@ -236,14 +245,25 @@ def load_cv_table(
     drop_nan:
         Drop rows where a loaded value is NaN (e.g. a proton-transfer CV without a chain; they
         are counted in ``report.nan``). With False they are kept, NaN.
+    select:
+        Keep only the frames of this ``Selection``; True (default): the selection active in
+        the project's configuration (``--select``), if any; False or None: no selection. The
+        CVs it needs are loaded for this purpose; frames left out are counted in
+        ``report.deselected``.
+    drop_deselected:
+        With False, the frames the selection leaves out are kept and ``table.selected`` tells
+        which are selected (to account for the others, e.g. in populations of all frames).
 
     The frames past each wall of a loaded CV are counted in ``report.walls`` in any case.
 
     A run of several walkers reads every walker's files (``COLVAR.<i>``, ``CV-<name>.<i>``,
     ``model_devi.<i>.out``, ...) and pools the rows; ``walker`` then gives each row's walker.
     """
+    if select is True:
+        select = run.config.active_selection
     options = dict(time=time, extra=extra, filters=filters, bias=bias,
-                   include_walls=include_walls, drop_nan=drop_nan)  # fmt: skip
+                   include_walls=include_walls, drop_nan=drop_nan,
+                   select=select or None, drop_deselected=drop_deselected)  # fmt: skip
     parts = [_load_walker(run, walker, cvs, **options) for walker in run.walker_ids]
     if len(parts) == 1:
         table = parts[0]
@@ -259,6 +279,9 @@ def load_cv_table(
             walker=np.concatenate(
                 [np.full(len(p), w) for p, w in zip(parts, run.walker_ids, strict=True)]
             ),
+            selected=np.concatenate([p.selected for p in parts])
+            if parts[0].selected is not None
+            else None,
         )
     if len(table) == 0:
         raise EstError(f"{run.name}: no rows left after selection ({table.report.summary()})")
@@ -274,6 +297,7 @@ def _merge_reports(reports: list[LoadReport]) -> LoadReport:
         merged.duplicates += r.duplicates
         merged.outside_time += r.outside_time
         merged.filtered += r.filtered
+        merged.deselected += r.deselected
         merged.rows += r.rows
         merged.walls_in_bias |= r.walls_in_bias
         for name, n in r.missing.items():
@@ -298,6 +322,8 @@ def _load_walker(
     bias: bool,
     include_walls: bool,
     drop_nan: bool = True,
+    select: Selection | None = None,
+    drop_deselected: bool = True,
 ) -> CVTable:
     """``load_cv_table`` for one walker's files (or the run's, ``walker=None``); may be empty."""
     meta = run.metadata
@@ -328,6 +354,13 @@ def _load_walker(
         if name not in wanted:
             wanted[name] = None if colvar.has(name) else run.file(_cv_source(name, config), walker)
             hidden.add(name)
+    if select is not None:
+        select.resolve([*colvar.fields, *config.cv, *cvs, *(extra or {})])
+        for name in select.names:
+            if name not in wanted:
+                wanted[name] = None if colvar.has(name) else run.file(_cv_source(name, config),
+                                                                     walker)  # fmt: skip
+                hidden.add(name)
     walls = meta.wall_terms
     if include_walls and bias:
         for wall in walls:
@@ -357,7 +390,9 @@ def _load_walker(
             other_tables[path] = read_table(path)
         except MissingFileError:
             needed_by = [n for n, p in wanted.items() if p == path]
-            if any(n in hidden and n not in (filters or {}) for n in needed_by):
+            selected = select.names if select is not None else []
+            if any(n in hidden and n not in (filters or {}) and n not in selected
+                   for n in needed_by):  # fmt: skip
                 raise MissingFileError(
                     f"{path} not found: needed for the energy of the wall on {', '.join(needed_by)}"
                 ) from None
@@ -436,6 +471,12 @@ def _load_walker(
             inside &= columns[name] <= hi
         report.filtered += int(np.count_nonzero(keep & ~inside))
         keep &= inside
+    chosen = None
+    if select is not None:
+        chosen = select.mask(columns)
+        report.deselected = int(np.count_nonzero(keep & ~chosen))
+        if drop_deselected:
+            keep &= chosen
 
     kbt = meta.kbt if meta.temperature is not None else None
     for name, past in wall_past.items():
@@ -458,6 +499,7 @@ def _load_walker(
         kbt=kbt,
         energy_units=meta.energy_units,
         report=report,
+        selected=chosen[keep] if chosen is not None and not drop_deselected else None,
     )
 
 

@@ -210,8 +210,11 @@ class ProjectConfig(_Section):
     plot: PlotConfig = Field(default_factory=PlotConfig)
     # named regions for estk basins: {name: {cv: [lo, hi]}} (null for an open end)
     basins: dict[str, dict[str, tuple[float | None, float | None]]] = Field(default_factory=dict)
+    # named frame selections for --select: {name: "condition on CVs"}
+    selections: dict[str, str] = Field(default_factory=dict)
 
     _path: Path | None = PrivateAttr(default=None)
+    _selection: Any = PrivateAttr(default=None)  # the Selection of --select, if any
 
     @model_validator(mode="before")
     @classmethod
@@ -233,6 +236,32 @@ class ProjectConfig(_Section):
                 if lo is not None and hi is not None and not lo < hi:
                     raise ValueError(f"basin '{name}': {cv} range [{lo}, {hi}] is empty")
         return value
+
+    @field_validator("selections")
+    @classmethod
+    def _check_selections(cls, value: dict[str, str]) -> dict[str, str]:
+        from estk.errors import EstError
+        from estk.selection import Selection
+
+        for name, text in value.items():
+            try:
+                Selection.parse(text, label=name)
+            except EstError as exc:
+                raise ValueError(str(exc)) from None
+        return value
+
+    @property
+    def active_selection(self) -> Any:
+        """The ``Selection`` every frame load applies (set by ``select``), or None."""
+        return self._selection
+
+    def select(self, text: str | None) -> Any:
+        """Restrict every analysis of this configuration to the frames of a selection: a name
+        under ``selections:`` or an expression (None: no selection). Returns the Selection."""
+        from estk.selection import selection_from
+
+        self._selection = selection_from(text, self.selections) if text else None
+        return self._selection
 
     @property
     def path(self) -> Path | None:

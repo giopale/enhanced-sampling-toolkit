@@ -75,7 +75,7 @@ def combine(surfaces: Mapping[str, Surface] | Sequence[Surface], mode: str = "eq
         "kbt": kbt,
         "frames": int(sum(s.metadata.get("frames", 0) for s in items)),
     }
-    for key in ("temperature", "energy_units", "time_window_ns", "walls_in_bias"):
+    for key in ("temperature", "energy_units", "time_window_ns", "walls_in_bias", "selection"):
         if key in first.metadata:
             meta[key] = first.metadata[key]
     meta.update(_per_run(runs, items))
@@ -143,7 +143,7 @@ def _legacy(runs: list[str], items: list[Surface], log_totals: np.ndarray) -> Su
         "frames": int(sum(s.metadata.get("frames", 0) for s in items)),
         "fes_offset": 0.0,
     }
-    for key in ("temperature", "energy_units", "time_window_ns"):
+    for key in ("temperature", "energy_units", "time_window_ns", "selection"):
         if key in first.metadata:
             meta[key] = first.metadata[key]
     meta.update(_per_run(runs, items))

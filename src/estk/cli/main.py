@@ -18,6 +18,7 @@ from rich.table import Table
 from estk import __version__
 from estk.config import (
     CONFIG_FILENAME,
+    ProjectConfig,
     config_template,
     find_config,
     is_bias_column,
@@ -42,7 +43,7 @@ err_console = Console(stderr=True)
 log = get_logger(__name__)
 
 # Options given before the subcommand (estk -v --config x.yaml ...).
-_state: dict[str, Any] = {"verbosity": 0, "config": None}
+_state: dict[str, Any] = {"verbosity": 0, "config": None, "select": None}
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -84,6 +85,7 @@ def main(
 ) -> None:
     _state["verbosity"] = 1 if verbose else -1 if quiet else 0
     _state["config"] = config
+    _state["select"] = None  # set by the commands that take --select
     setup_cli_logging(_state["verbosity"])
     from estk.io.textfile import set_command
 
@@ -134,7 +136,7 @@ def runs() -> None:
     """List the runs and the simulation settings read for each one."""
     from estk.project import Project
 
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     any_walkers = any(run.walkers is not None for run in project.runs)
     table = Table("run", *(["walkers"] if any_walkers else []), "T (K)", "timestep (ps)", "bias",
                   "bias factor", "walls", "units")  # fmt: skip
@@ -186,7 +188,7 @@ def cvs(
     """Load CVs from every run and show how many rows were kept and the range of each CV."""
     from estk.project import Project
 
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     table = Table("run", "rows", "time (ns)", *names, "past walls", "notes")
     for run in project.runs:
         data = run.load_cvs(names, time=time, bias=False)
@@ -266,16 +268,18 @@ def reweight(
             "bar of one simulation, e.g. of walkers sharing a bias."
         ),
     ] = 1,
+    select: SelectOption = None,
 ) -> None:
     """Reweight every run to a free-energy surface (or property average) on a common grid.
 
     Writes one file per run, <output>/<run>.dat, and the combination of all runs,
     <output>/combined.dat, in PLUMED grid format.
     """
+    _state["select"] = select
     from estk.project import Project
 
     mode = _combine_mode(combine)
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     result = project.reweight(
         names,
         quantity=prop,
@@ -355,6 +359,7 @@ def bandwidth_command(
             "--save", help="Write the all-runs values (of scv, or of the one --method) to the yaml."
         ),
     ] = False,
+    select: SelectOption = None,
 ) -> None:
     """Kernel bandwidths by Silverman's rule and by smoothed cross-validation (SCV).
 
@@ -363,6 +368,7 @@ def bandwidth_command(
     which with few effective frames smooths the barrier regions away. estk reweight uses the
     estk.yaml values, or a method with --bandwidth scv / silverman / scv-weighted.
     """
+    _state["select"] = select
     from estk.config import set_cv_bandwidths
     from estk.project import Project
     from estk.reweight import estimate_bandwidths
@@ -371,7 +377,7 @@ def bandwidth_command(
     methods = list(dict.fromkeys(method or ["silverman", "scv"]))
     if any(m not in BANDWIDTH_METHODS for m in methods):
         raise EstError(f"--method: choose from {', '.join(BANDWIDTH_METHODS)}")
-    config = load_config(_state["config"])
+    config = _project_config()
     if save and config.path is None:
         raise EstError(f"--save: no {CONFIG_FILENAME} found (run estk init first)")
     estimates = estimate_bandwidths(
@@ -585,6 +591,24 @@ OutputsOption = Annotated[
     typer.Option("--output", "-o", help="Output file(s); the extension sets the format (repeat)."),
 ]
 
+SelectOption = Annotated[
+    str | None,
+    typer.Option(
+        "--select",
+        help="Only the frames where this holds: a name under selections: in estk.yaml or a "
+        "condition, e.g. '1.8 < d0 < 2.3 and cn > 1.5' (- and . in CV names as _).",
+    ),
+]
+
+
+def _project_config() -> ProjectConfig:
+    """estk.yaml, with the command's --select (if any) applied to every frame load."""
+    config = load_config(_state["config"])
+    if _state.get("select"):
+        selection = config.select(_state["select"])
+        console.print(f"selection: {selection.describe()}", style="dim")
+    return config
+
 
 @app.command()
 @handle_errors
@@ -676,9 +700,11 @@ def along_path(
     units: UnitsOption = None,
     style: StyleOption = None,
     output: OutputsOption = None,
+    select: SelectOption = None,
 ) -> None:
     """Average other quantities along a minimum energy path: what they are, on average, at
     each point of the path, per run and combined."""
+    _state["select"] = select
     import matplotlib.pyplot as plt
 
     from estk.analysis import averages_along_path
@@ -688,7 +714,7 @@ def along_path(
     from estk.plotting.core import use_agg
     from estk.project import Project
 
-    config = load_config(_state["config"])
+    config = _project_config()
     path = MinimumEnergyPath.load(file)
     sources = {}
     for item in source or []:
@@ -785,10 +811,12 @@ def basins(
         Path | None,
         typer.Option("--output", "-o", help="Output folder (default: basins-<cvs>)."),
     ] = None,
+    select: SelectOption = None,
 ) -> None:
     """Populations of the free-energy basins, counted on the reweighted frames: automatic
     basins of the surface, or the named regions under basins: in estk.yaml. With --quantity,
     also the average of each quantity in each basin and over everything."""
+    _state["select"] = select
     import matplotlib.pyplot as plt
 
     from estk.analysis import basin_populations
@@ -798,7 +826,7 @@ def basins(
     from estk.project import Project
     from estk.surface import Surface
 
-    config = load_config(_state["config"])
+    config = _project_config()
     project = Project(config)
     sources = {}
     for item in source or []:
@@ -867,6 +895,12 @@ def basins(
             "CV undefined", *empty, "", "", "", "", pm(gone, gone_err, ".4f"), "",
             *["" for _ in result.quantities], style="dim",
         )  # fmt: skip
+    if result.deselected_fraction > 0:
+        out, out_err = result.deselected_population
+        table.add_row(
+            "not selected", *empty, "", "", "", "", pm(out, out_err, ".4f"), "",
+            *["" for _ in result.quantities], style="dim",
+        )  # fmt: skip
     console.print(table)
     kind = "runs" if len(result.metadata["runs"]) > 1 else "time blocks"
     console.print(
@@ -879,6 +913,13 @@ def basins(
         console.print(f"in no region: {result.unassigned:.4f} in the grid, "
                       f"{result.unassigned_of_all:.4f} of all frames")  # fmt: skip
     console.print(f"frames: {result.metadata['frames']} in the time window, all runs")
+    if result.deselected_fraction > 0:
+        console.print(
+            f"not selected ({result.metadata.get('selection')}): "
+            f"{100 * result.deselected_fraction:.1f} % of the frames, "
+            f"{100 * result.deselected_population[0]:.1f} % of the reweighted population "
+            "(in 'of all frames'; 'in the grid' is within the selection)"
+        )
     console.print(f"past the grid limits (walls): {100 * result.outside_fraction:.1f} % of the "
                   f"frames, {100 * past:.1f} % of the reweighted population")  # fmt: skip
     if result.undefined_fraction > 0:
@@ -943,9 +984,11 @@ def average(
     ] = True,
     style: StyleOption = None,
     output: OutputsOption = None,
+    select: SelectOption = None,
 ) -> None:
     """Equilibrium (reweighted) average of each quantity over all frames, with its error, and
     a bar chart; e.g. the occupation of each surface site from its coordination number."""
+    _state["select"] = select
     import matplotlib.pyplot as plt
 
     from estk.analysis import ensemble_averages
@@ -953,7 +996,7 @@ def average(
     from estk.plotting.core import use_agg
     from estk.project import Project
 
-    config = load_config(_state["config"])
+    config = _project_config()
     sources = {}
     for item in source or []:
         name, sep, value = item.partition("=")
@@ -984,6 +1027,17 @@ def average(
                       f"{result.errors[q]:.2g}" if np.isfinite(result.errors[q]) else "-",
                       *[f"{result.runs[r][q]:.4g}" for r in result.runs])  # fmt: skip
     console.print(table)
+    if "selected_share" in result.metadata:
+        share, share_err = result.metadata["selected_share"]
+        console.print(
+            f"averages over the selection ({result.metadata['selection']}): "
+            f"{100 * result.metadata['selected_frames']:.1f} % of the frames, "
+            f"{100 * share:.1f} % ± {100 * share_err:.1g} of the reweighted population"
+            if np.isfinite(share_err) else
+            f"averages over the selection ({result.metadata['selection']}): "
+            f"{100 * result.metadata['selected_frames']:.1f} % of the frames, "
+            f"{100 * share:.1f} % of the reweighted population"
+        )  # fmt: skip
     how = result.metadata["error"] or "no error bar (one run; use --blocks)"
     console.print(f"reweighted over {result.metadata['frames']} frames; error: standard error "
                   f"{how}", style="dim")  # fmt: skip
@@ -1069,15 +1123,17 @@ def structures_basins(
         Path | None,
         typer.Option("--output", "-o", help="extxyz file (default: structures-<cvs>.extxyz)."),
     ] = None,
+    select: SelectOption = None,
 ) -> None:
     """Sample structures from the free-energy basins (those of estk basins) and write them to
     one extended-XYZ file, with each frame's CVs, basin, run, step and free energy in its
     header."""
+    _state["select"] = select
     from estk.analysis.structures import sample_basins
     from estk.project import Project
     from estk.surface import Surface
 
-    config = load_config(_state["config"])
+    config = _project_config()
     project = Project(config)
     sources = {}
     for item in source or []:
@@ -1283,7 +1339,7 @@ def _convergence(
     if mode is None:
         raise EstError("--combine none: the barrier is measured on the combined surface")
     folder = output or Path("convergence-" + "-".join(names) + f"-{parameter}")
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     result = barrier_convergence(
         project,
         names,
@@ -1371,8 +1427,10 @@ def convergence_time(
         bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
     ] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output folder.")] = None,
+    select: SelectOption = None,
 ) -> None:
     """Barrier against the length of the simulation (windows start..step, ..., start..until)."""
+    _state["select"] = select
     if step <= 0 or until <= 0:
         raise EstError("--until and --step must be positive")
     first = (start or 0.0) + step
@@ -1423,8 +1481,10 @@ def convergence_bandwidth(
         bool, typer.Option("--save-steps", help="Keep each step's surface and path.")
     ] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output folder.")] = None,
+    select: SelectOption = None,
 ) -> None:
     """Barrier against the kernel bandwidth of one CV."""
+    _state["select"] = select
     if values is not None:
         try:
             scan = [float(v) for v in values.split(",") if v.strip()]
@@ -1606,7 +1666,7 @@ def check_opes(
     from estk.plotting.diagnostics import plot_timeseries
     from estk.project import Project
 
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     series = {}
     columns: list[str] = []
     for run in project.runs:
@@ -1662,7 +1722,7 @@ def check_model_deviation(
         low, high = (float(v) for v in levels.split(","))
     except ValueError:
         raise EstError(f"--levels: expected two numbers like 0.2,0.35, got {levels!r}") from None
-    project = Project(load_config(_state["config"]))
+    project = Project(_project_config())
     name = file or project.config.files.model_deviation
     series = {}
     for run in project.runs:

@@ -464,6 +464,43 @@ total <covO2c> = 0.026 ± 0.003
   - `basins.png`: the surface with the basin boundaries and populations; draw a path on it
     with `--path`.
 
+### Selecting frames (`--select`)
+
+Any analysis can be restricted to the frames where a condition on the CVs holds. For example,
+to keep one proton-transfer channel, or only some region of d0/cn. Name the conditions in
+`estk.yaml`:
+
+```yaml
+selections:
+  channel: "(cn - 1.5) * indirect_delta_B < 0.05"   # cn and δ_B of opposite signs
+  bound: "1.8 < d0 < 2.3 and cn > 1.5"
+```
+
+or write them on the command line:
+
+```bash
+estk reweight indirect-delta-B indirect-d-B --select channel
+estk average cnO2cA cnO2cB1 ... --select "d0 < 2.0"
+```
+
+- **Where it works.** `reweight`, `bandwidth`, `along-path`, `convergence`, `basins`,
+  `average` and `structures basins` all take `--select`.
+- **What you can write.**
+  - Numbers, CV names, `+ - * / ^`, comparisons (also chained: `1.8 < d0 < 2.3`),
+    `and`/`or`/`not`, and `abs sqrt exp log sin cos tan min max`.
+  - A CV name with `-` or `.` is written with `_` (`indirect_delta_B`, `dOOliq_min`), or
+    `dOOliq.min` as is, or in braces (`{indirect-delta-B}`).
+  - A frame where a CV of the condition is undefined (NaN) is not selected.
+- **What the results mean.** Results are *conditional* on the selection: F_sel(x) =
+  F(x) − kT ln P(selected | x), and averages over the selected frames. The selection is written
+  into the files' headers (`estk.selection`).
+- **How much is left out.**
+  - `basins` gives the frames left out a row of their own, "not selected", in "of all frames".
+  - `average` prints the reweighted share of the population that was selected.
+- **Check a cut near a transition region.** If a condition cuts close to where two basins
+  meet, try a few margins (e.g. 0.02, 0.05, 0.1) and check that the result doesn't depend on
+  them.
+
 ### Equilibrium averages, e.g. site occupations
 
 `estk average` gives the reweighted average of any quantity over all frames: Σ wᵢ qᵢ / Σ wᵢ,

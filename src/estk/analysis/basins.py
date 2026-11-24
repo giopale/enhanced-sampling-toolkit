@@ -49,6 +49,7 @@ log = get_logger(__name__)
 NO_DATA = -1  # label of grid cells (and frames) without data, or in no named region
 OUTSIDE = -2  # label of frames outside the grid limits
 UNDEFINED = -3  # label of frames where a CV of the basins is undefined (NaN)
+NOT_SELECTED = -4  # label of frames left out by the selection (--select)
 
 Region = Mapping[str, tuple[float | None, float | None]]
 
@@ -257,6 +258,9 @@ class BasinResult:
     # reweighted share of all frames (value, error) and their raw fraction
     undefined_population: tuple[float, float] = (0.0, 0.0)
     undefined_fraction: float = 0.0
+    # frames left out by --select: reweighted share of all frames (value, error), raw fraction
+    deselected_population: tuple[float, float] = (0.0, 0.0)
+    deselected_fraction: float = 0.0
 
     @property
     def quantities(self) -> list[str]:
@@ -298,6 +302,8 @@ class BasinResult:
             "unassigned_of_all": self.unassigned_of_all,
             "undefined_population": list(self.undefined_population),
             "undefined_fraction": self.undefined_fraction,
+            "deselected_population": list(self.deselected_population),
+            "deselected_fraction": self.deselected_fraction,
             "totals_of_all": {q: list(v) for q, v in self.totals_of_all.items()},
             "grid": {"names": list(self.grid.names), "lower": list(self.grid.lower),
                      "upper": list(self.grid.upper), "points": list(self.grid.points)},
@@ -335,6 +341,8 @@ class BasinResult:
         unassigned_of_all = float(meta.pop("unassigned_of_all", math.nan))
         undefined_population = tuple(float(v) for v in meta.pop("undefined_population", [0, 0]))
         undefined_fraction = float(meta.pop("undefined_fraction", 0.0))
+        deselected_population = tuple(float(v) for v in meta.pop("deselected_population", [0, 0]))
+        deselected_fraction = float(meta.pop("deselected_fraction", 0.0))
         basins = []
         with open_text(path) as handle:
             for line in handle:
@@ -366,6 +374,8 @@ class BasinResult:
             unassigned_of_all=unassigned_of_all, totals_of_all=totals_of_all,
             undefined_population=undefined_population,  # type: ignore[arg-type]
             undefined_fraction=undefined_fraction,
+            deselected_population=deselected_population,  # type: ignore[arg-type]
+            deselected_fraction=deselected_fraction,
         )  # fmt: skip
 
 
@@ -380,11 +390,12 @@ class _RunEstimate:
     averages: dict[str, np.ndarray]  # q -> (basins,)
     totals: dict[str, float]  # q -> <q> over all frames inside the grid
     outside: float  # raw fraction of frames outside the grid
-    # of all frames: (basins + 3,): basins, unassigned, past the walls, CV undefined
+    # of all frames: (basins + 4,): basins, unassigned, past the walls, CV undefined, not selected
     of_all: np.ndarray = field(default_factory=lambda: np.empty(0))
     log_all: float = -math.inf  # log of the total weight of all frames
     totals_all: dict[str, float] = field(default_factory=dict)  # q -> <q> over all frames
     undefined: float = 0.0  # raw fraction of frames where a CV of the basins is NaN
+    deselected: float = 0.0  # raw fraction of frames left out by the selection
 
 
 def _mean(w: np.ndarray, v: np.ndarray) -> float:
@@ -399,8 +410,9 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
     inside = labels >= NO_DATA  # in the grid: not past the walls, CVs defined
     outside = float(np.mean(labels == OUTSIDE)) if len(labels) else math.nan
     undefined = float(np.mean(labels == UNDEFINED)) if len(labels) else math.nan
+    deselected = float(np.mean(labels == NOT_SELECTED)) if len(labels) else math.nan
     # shares of all frames (past the walls too, with the OPES weights only)
-    of_all = np.full(n_basins + 3, math.nan)
+    of_all = np.full(n_basins + 4, math.nan)
     log_all, totals_all = -math.inf, {q: math.nan for q in values}
     if len(labels):
         w_all = np.exp(logw - logw.max())
@@ -411,6 +423,7 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
         of_all[n_basins] = w_all[labels == NO_DATA].sum() / all_total
         of_all[n_basins + 1] = w_all[labels == OUTSIDE].sum() / all_total
         of_all[n_basins + 2] = w_all[labels == UNDEFINED].sum() / all_total
+        of_all[n_basins + 3] = w_all[labels == NOT_SELECTED].sum() / all_total
         totals_all = {q: _mean(w_all, v) for q, v in values.items()}
     lab, lw = labels[inside], logw[inside]
     if not len(lab):
@@ -426,6 +439,7 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
             log_all=log_all,
             totals_all=totals_all,
             undefined=undefined,
+            deselected=deselected,
         )
     peak = float(lw.max())
     w = np.exp(lw - peak)
@@ -444,7 +458,7 @@ def _estimate(labels: np.ndarray, logw: np.ndarray, values: Mapping[str, np.ndar
     populations[n_basins] = w[lab == NO_DATA].sum() / total
     totals = {q: _mean(w, v[inside]) for q, v in values.items()}
     return _RunEstimate(populations, peak + math.log(total), effective, averages, totals,
-                        outside, of_all, log_all, totals_all, undefined)  # fmt: skip
+                        outside, of_all, log_all, totals_all, undefined, deselected)  # fmt: skip
 
 
 def _standard_error(values: np.ndarray) -> float:
@@ -517,10 +531,14 @@ def basin_populations(
     frames = 0
     for run in project.runs:
         # frames where a CV is undefined (NaN) are kept: they are part of "all frames"
-        table = run.load_cvs(cvs + loaded, time=time, extra=extra or None, drop_nan=False)
+        # frames left out by --select are kept and marked, to count them in "of all frames"
+        table = run.load_cvs(cvs + loaded, time=time, extra=extra or None, drop_nan=False,
+                             drop_deselected=False)  # fmt: skip
         if table.bias is None or table.kbt is None:
             raise EstError(f"{run.name}: no bias or temperature; cannot weight the frames")
         frame_labels = _frame_labels(table.array(cvs), grid, labels, regions)
+        if table.selected is not None:
+            frame_labels[~table.selected] = NOT_SELECTED
         frames += len(table)
         logw = table.bias / table.kbt
         values = {q: np.asarray(table[q], dtype=float) for q in quantities}
@@ -620,6 +638,13 @@ def basin_populations(
         spread(table_all[:, gone], [b.of_all[gone] for b in blocks_of_first]
                if blocks_of_first else None),
     )  # fmt: skip
+    out = n + 3
+    deselected_population = (
+        float(of_all[out]),
+        spread(table_all[:, out], [b.of_all[out] for b in blocks_of_first]
+               if blocks_of_first else None),
+    )  # fmt: skip
+    deselected = float(np.mean([estimates[r].deselected for r in runs]))
     undefined = float(np.mean([estimates[r].undefined for r in runs]))
     outside = float(np.mean([estimates[r].outside for r in runs]))
     for b in basins:
@@ -638,6 +663,8 @@ def basin_populations(
         if regions else None,
         "temperature": surface.metadata.get("temperature"),
         "frames": frames,
+        **({"selection": project.config.active_selection.describe()}
+           if project.config.active_selection is not None else {}),
     }  # fmt: skip
     return BasinResult(
         names=tuple(cvs), basins=basins, labels=labels, grid=grid, units=surface.units, kbt=kbt,
@@ -645,4 +672,5 @@ def basin_populations(
         metadata=metadata, outside_population=outside_population,
         unassigned_of_all=float(of_all[n]), totals_of_all=totals_all,
         undefined_population=undefined_population, undefined_fraction=undefined,
+        deselected_population=deselected_population, deselected_fraction=deselected,
     )  # fmt: skip
