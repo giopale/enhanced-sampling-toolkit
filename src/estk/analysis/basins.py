@@ -170,9 +170,15 @@ def define_basins(
     *,
     regions: Mapping[str, Region] | None = None,
     min_depth_kt: float = 2.0,
+    automatic: bool = False,
 ) -> BasinDefinition:
-    """The basins of ``surface``: the named ``regions`` (default: ``basins:`` of estk.yaml, if
-    set) or the automatic basins (``basin_map``, merged below ``min_depth_kt``)."""
+    """The basins of ``surface``: the named ``regions``, or the automatic basins (``basin_map``,
+    merged below ``min_depth_kt``).
+
+    Without ``regions``, the regions of ``basins:`` in estk.yaml whose CVs are all CVs of the
+    surface are used (regions in other CVs belong to other surfaces and are skipped); if none
+    is, or with ``automatic``, the basins are automatic.
+    """
     cvs = list(cvs)
     if not surface.is_fes:
         raise EstError(f"the surface is a {surface.quantity} surface, not a free energy")
@@ -181,8 +187,17 @@ def define_basins(
     kbt = float(surface.metadata.get("kbt") or 0.0)
     if kbt <= 0:
         raise EstError("the surface has no kT in its metadata")
-    if regions is None and project.config.basins:
-        regions = {name: dict(r) for name, r in project.config.basins.items()}
+    if automatic:
+        regions = None
+    elif regions is None and project.config.basins:
+        configured = {name: dict(r) for name, r in project.config.basins.items()}
+        regions = {name: r for name, r in configured.items() if set(r) <= set(cvs)}
+        skipped = sorted(set(configured) - set(regions))
+        if skipped:
+            log.info("basins in estk.yaml not in %s, skipped: %s", "/".join(cvs),
+                     ", ".join(skipped))  # fmt: skip
+        if not regions:
+            log.info("no basin of estk.yaml is in %s: automatic basins", "/".join(cvs))
     if regions:
         unknown = sorted({cv for r in regions.values() for cv in r} - set(cvs))
         if unknown:
@@ -379,6 +394,7 @@ def basin_populations(
     surface: Surface | None = None,
     regions: Mapping[str, Region] | None = None,
     min_depth_kt: float = 2.0,
+    automatic: bool = False,
     quantities: Sequence[str] = (),
     sources: Mapping[str, str | Path] | None = None,
     time: tuple[float | None, float | None] | None = None,
@@ -396,7 +412,8 @@ def basin_populations(
     regions:
         Named regions ``{name: {cv: (lo, hi)}}`` (None for an open end; CVs left out are not
         restricted) instead of automatic basins. A frame in several belongs to the first.
-        Default: ``basins:`` of estk.yaml if set, otherwise automatic basins.
+        Default: the regions of ``basins:`` in estk.yaml in these CVs, otherwise automatic
+        basins (also with ``automatic``).
     min_depth_kt:
         Automatic basins shallower than this (kT) are merged into their neighbours.
     quantities, sources:
@@ -420,7 +437,8 @@ def basin_populations(
     if surface is None:
         options = dict(reweight_options or {})
         surface = project.reweight(cvs, time=time, combine=combine, **options).combined
-    definition = define_basins(project, cvs, surface, regions=regions, min_depth_kt=min_depth_kt)
+    definition = define_basins(project, cvs, surface, regions=regions, min_depth_kt=min_depth_kt,
+                               automatic=automatic)  # fmt: skip
     kbt, grid, labels = definition.kbt, surface.grid, definition.labels
     names, mode, regions = definition.names, definition.mode, definition.regions
     n = len(names)

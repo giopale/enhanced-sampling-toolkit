@@ -197,3 +197,23 @@ def test_command(project, monkeypatch):
     assert (root / "again" / "basins.dat").is_file()
     out = runner.invoke(app, ["basins", "d0", "cn", "--source", "oops"])
     assert out.exit_code == 1 and "--source" in out.output
+
+
+def test_config_regions_of_other_surfaces_are_skipped(project, tmp_path):
+    """estk.yaml can name basins for several surfaces: each surface uses the ones in its CVs."""
+    root = project.config.path.parent
+    text = (root / "estk.yaml").read_text()
+    other = text + "basins:\n  pt-left: {indirect-delta-B: [null, 0]}\n"
+    (tmp_path / "estk.yaml").write_text(other.replace("runs:\n", f"runs:\n  root: {root}\n"))
+    only_other = Project(tmp_path / "estk.yaml")
+    result = basin_populations(only_other, ["d0", "cn"], reweight_options=OPTIONS)
+    assert result.metadata["mode"] == "automatic" and len(result.basins) == 2
+
+    both = other + "  left: {d0: [null, 1.95]}\n"
+    (tmp_path / "estk.yaml").write_text(both.replace("runs:\n", f"runs:\n  root: {root}\n"))
+    mixed = Project(tmp_path / "estk.yaml")
+    result = basin_populations(mixed, ["d0", "cn"], reweight_options=OPTIONS)
+    assert result.metadata["mode"] == "regions"
+    assert [b.name for b in result.basins] == ["left"]
+    forced = basin_populations(mixed, ["d0", "cn"], automatic=True, reweight_options=OPTIONS)
+    assert forced.metadata["mode"] == "automatic"

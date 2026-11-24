@@ -129,6 +129,7 @@ def sample_basins(
     basins: Sequence[str] | None = None,
     regions: Mapping[str, Region] | None = None,
     min_depth_kt: float = 2.0,
+    automatic: bool = False,
     quantities: Sequence[str] = (),
     sources: Mapping[str, str | Path] | None = None,
     time: tuple[float | None, float | None] | None = None,
@@ -151,8 +152,9 @@ def sample_basins(
         raise EstError(f"combine must be equal or probability, got '{combine}'")
     if n < 1:
         raise EstError(f"n must be at least 1, got {n}")
-    definition: BasinDefinition = define_basins(project, cvs, surface, regions=regions,
-                                                min_depth_kt=min_depth_kt)  # fmt: skip
+    definition: BasinDefinition = define_basins(
+        project, cvs, surface, regions=regions, min_depth_kt=min_depth_kt, automatic=automatic
+    )
     chosen = list(basins) if basins else list(definition.names)
     unknown = [b for b in chosen if b not in definition.names]
     if unknown:

@@ -412,6 +412,12 @@ total <covO2c> = 0.026 ± 0.003
     ```
 
     Frames in no region are reported as "in no region".
+
+    - **Several surfaces in one file.** You can list basins for different surfaces together.
+      Each surface uses only the regions whose CVs are all its own: `d0 cn` ignores a region
+      in `indirect-delta-B`, and vice versa.
+    - **No matching region** means the basins are automatic.
+    - `--automatic` forces automatic basins even when regions match.
 - **Populations are counted on the frames.** P_A = Σ_{i∈A} wᵢ / Σᵢ wᵢ with wᵢ = exp(Vᵢ/kT).
   No kernel is involved, so the bandwidth doesn't matter. ΔF = −kT ln(P_A/P_ref), relative to
   the most populated basin.

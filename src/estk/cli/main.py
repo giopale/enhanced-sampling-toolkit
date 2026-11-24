@@ -746,6 +746,10 @@ def basins(
     min_depth: Annotated[
         float, typer.Option(help="Basins shallower than this (kT) are merged into neighbours.")
     ] = 2.0,
+    automatic: Annotated[
+        bool,
+        typer.Option("--automatic", help="Automatic basins even if estk.yaml names regions."),
+    ] = False,
     quantity: Annotated[
         list[str] | None,
         typer.Option(help="Quantity to average in each basin, e.g. covO2c (repeat)."),
@@ -814,7 +818,8 @@ def basins(
             limits=_parse_assignments(limits, "limits", pair=True), **_parse_bandwidth(bandwidth),
         ).combined  # fmt: skip
     result = basin_populations(
-        project, names, surface=surface, min_depth_kt=min_depth, quantities=quantity or [],
+        project, names, surface=surface, min_depth_kt=min_depth, automatic=automatic,
+        quantities=quantity or [],
         sources=sources, time=time, blocks=blocks, combine=mode,
     )  # fmt: skip
 
@@ -903,6 +908,10 @@ def structures_basins(
     min_depth: Annotated[
         float, typer.Option(help="Basins shallower than this (kT) are merged into neighbours.")
     ] = 2.0,
+    automatic: Annotated[
+        bool,
+        typer.Option("--automatic", help="Automatic basins even if estk.yaml names regions."),
+    ] = False,
     mode: Annotated[
         str,
         typer.Option(
@@ -963,7 +972,7 @@ def structures_basins(
         surface = project.reweight(names, time=time, combine=combine.lower(),
                                    points=_parse_points(points)).combined  # fmt: skip
     sample = sample_basins(
-        project, names, surface, n=n, basins=basin, min_depth_kt=min_depth,
+        project, names, surface, n=n, basins=basin, min_depth_kt=min_depth, automatic=automatic,
         quantities=quantity or [], sources=sources, time=time, mode=mode.lower(),
         combine=combine.lower(), dump=dump, seed=seed,
     )  # fmt: skip
