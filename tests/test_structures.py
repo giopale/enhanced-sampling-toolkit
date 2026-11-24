@@ -20,9 +20,10 @@ L = np.array([10.0, 11.0, 30.0])
 N = 3000
 
 
-def write_dump(path, steps, *, element=True):
+def write_dump(path, steps, *, element=True, lammps_default=False):
     """3 atoms, written in reverse id order; atom 1 sits at x = step / 1e5 (from the cell
-    origin) so that a structure can be traced back to its step."""
+    origin) so that a structure can be traced back to its step. ``lammps_default``: the
+    element column says C for every atom, as LAMMPS writes it without dump_modify element."""
     lines = []
     for step in steps:
         lines += ["ITEM: TIMESTEP", str(step), "ITEM: NUMBER OF ATOMS", "3",
@@ -31,7 +32,7 @@ def write_dump(path, steps, *, element=True):
         lines.append("ITEM: ATOMS id type" + (" element" if element else "") + " x y z")
         atoms = [(1, 2, "O", step / 1e5), (2, 1, "H", 1.0), (3, 1, "H", 2.0)]
         for atom_id, kind, symbol, x in reversed(atoms):
-            name = f" {symbol}" if element else ""
+            name = f" {'C' if lammps_default else symbol}" if element else ""
             lines.append(f"{atom_id} {kind}{name} {LO[0] + x:.8f} {LO[1] + 1:.8f} {LO[2] + 1:.8f}")
     path.write_text("\n".join(lines) + "\n")
 
@@ -142,3 +143,37 @@ def test_command(project, surface, monkeypatch):
     assert "wrote 5 structures" in out.output
     structures = read_extxyz(root / "structures-d0-cn.extxyz")
     assert len(structures) == 5 and all(h["basin"] == "1" for h, _, _ in structures)
+
+
+def test_species(project, surface, tmp_path, monkeypatch):
+    """atoms.type_map wins; the element column is used without it, unless it is LAMMPS's
+    default (C for every type); --type-map gives the map on the command line."""
+    root = tmp_path / "proj"
+    write_tilted(root / "r0", 0, n=600)
+    write_dump(root / "r0" / "traj.lammpstrj", np.arange(0, 600, 2) * 100, lammps_default=True)
+    (root / "estk.yaml").write_text(CONFIG.format(pattern="r*"))
+    plain = Project(root / "estk.yaml")
+    sample = sample_basins(plain, ["d0", "cn"], surface, n=3)
+    with pytest.raises(EstError, match="dump_modify element"):
+        sample.write(plain, tmp_path / "x.extxyz")
+    path = sample.write(plain, tmp_path / "x.extxyz", type_map={1: "H", 2: "O"})
+    assert all(s == ["O", "H", "H"] for _, s, _ in read_extxyz(path))
+    with pytest.raises(EstError, match="no element for type"):
+        sample.write(plain, tmp_path / "x.extxyz", type_map={1: "H"})
+
+    write_dump(root / "r0" / "traj.lammpstrj", np.arange(0, 600, 2) * 100)  # real elements
+    path = sample.write(plain, tmp_path / "y.extxyz")
+    assert all(s == ["O", "H", "H"] for _, s, _ in read_extxyz(path))
+
+    write_dump(root / "r0" / "traj.lammpstrj", np.arange(0, 600, 2) * 100, lammps_default=True)
+    monkeypatch.chdir(root)
+    surface.save(root / "fes.dat")
+    runner = CliRunner()
+    args = ["structures", "basins", "d0", "cn", "--surface", "fes.dat", "-n", "2"]
+    out = runner.invoke(app, args)
+    assert out.exit_code == 1 and "dump_modify element" in out.output
+    out = runner.invoke(app, [*args, "--type-map", "1=H,2=O"])
+    assert out.exit_code == 0, out.output
+    assert all(s == ["O", "H", "H"] for _, s, _ in read_extxyz(root / "structures-d0-cn.extxyz"))
+    out = runner.invoke(app, [*args, "--type-map", "H,O"])
+    assert out.exit_code == 1 and "--type-map" in out.output

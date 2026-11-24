@@ -927,6 +927,13 @@ def structures_basins(
         str, typer.Option(help="LAMMPS dump in each run folder (walkers: traj.<i>.lammpstrj).")
     ] = "traj.lammpstrj",
     seed: Annotated[int, typer.Option(help="Random seed (the same seed, the same sample).")] = 0,
+    type_map: Annotated[
+        str | None,
+        typer.Option(
+            help="Element of each atom type, e.g. 1=H,2=O,3=Ti (default: atoms.type_map "
+            "in estk.yaml, else the dump's element column)."
+        ),
+    ] = None,
     points: Annotated[
         str, typer.Option(help="Grid points when reweighting here (100 or 100,80).")
     ] = "100",
@@ -962,7 +969,16 @@ def structures_basins(
     )  # fmt: skip
     target = output or Path("structures-" + "-".join(names) + ".extxyz")
     units, _ = _display(None, None)
-    sample.write(project, target, dump=dump, units=units)
+    types = None
+    if type_map:
+        try:
+            pairs = [item.split("=", 1) for item in type_map.split(",") if item.strip()]
+            types = {int(k): v.strip() for k, v in pairs}
+        except ValueError:
+            raise EstError(f"--type-map: expected e.g. 1=H,2=O,3=Ti, got {type_map!r}") from None
+        if not types or not all(types.values()):
+            raise EstError(f"--type-map: expected e.g. 1=H,2=O,3=Ti, got {type_map!r}")
+    sample.write(project, target, dump=dump, units=units, type_map=types)
 
     from estk.plotting.core import energy_scale
 

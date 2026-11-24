@@ -263,27 +263,41 @@ def key_name(name: str) -> str:
     return key if re.match(r"[A-Za-z_]", key) else f"_{key}"
 
 
+_TYPE_MAP_HINT = (
+    "set atoms.type_map in estk.yaml (e.g. type_map: {1: H, 2: O, 3: Ti}) or pass --type-map "
+    "1=H,2=O,3=Ti; the order of the elements in the LAMMPS pair_coeff line (pair_coeff * * "
+    "model H O Ti) gives the types 1, 2, 3"
+)
+
+
 def _species_columns(source: Path) -> list[str]:
-    """``element`` if the dump has it, else ``type``."""
-    names = dump_columns(source)
-    if "element" in names:
-        return ["element"]
-    if "type" in names:
-        return ["type"]
-    raise EstError(f"{source}: the dump has neither an 'element' nor a 'type' column")
+    """The dump's ``type`` and ``element`` columns (whichever it has)."""
+    names = [c for c in ("type", "element") if c in dump_columns(source)]
+    if not names:
+        raise EstError(f"{source}: the dump has neither a 'type' nor an 'element' column")
+    return names
 
 
 def _species(frame: Frame, type_map: Mapping[int, str], source: Path) -> list[str]:
+    """Element of each atom: from ``type_map`` (it wins when set), else the dump's ``element``
+    column, unless that is LAMMPS's default: the same name for atoms of different types (C for
+    every type without ``dump_modify element``)."""
+    types = frame.columns["type"].astype(int) if "type" in frame.columns else None
+    if type_map and types is not None:
+        missing = sorted(set(types.tolist()) - set(type_map))
+        if missing:
+            raise EstError(f"{source}: atoms.type_map has no element for type(s) {missing}")
+        return [type_map[t] for t in types]
     if "element" in frame.columns:
-        return [str(e) for e in frame.columns["element"]]
-    types = frame.columns["type"].astype(int)
-    missing = sorted(set(types.tolist()) - set(type_map))
-    if missing:
-        raise EstError(
-            f"{source}: no element for atom type(s) {missing}; add them to atoms.type_map in "
-            "estk.yaml, e.g. type_map: {1: H, 2: O, 3: Ti}"
-        )
-    return [type_map[t] for t in types]
+        elements = [str(e) for e in frame.columns["element"]]
+        if types is not None and len(set(elements)) == 1 and len(set(types.tolist())) > 1:
+            raise EstError(
+                f"{source}: the element column says {elements[0]} for every atom although they "
+                f"have {len(set(types.tolist()))} types: LAMMPS writes that without dump_modify "
+                f"element. To get the elements, {_TYPE_MAP_HINT}"
+            )
+        return elements
+    raise EstError(f"{source}: the dump has atom types but no elements; {_TYPE_MAP_HINT}")
 
 
 def _format(value: Any) -> str:

@@ -469,8 +469,12 @@ This writes `structures-d0-cn.extxyz`: 20 structures from each basin, in one fil
 - **Atoms.**
   - Atoms are written in id order, at the dump's positions, shifted so that the cell starts at
     the origin.
-  - Species come from the dump's `element` column, or from `type` via `atoms.type_map` in
-    `estk.yaml`.
+  - **Species** come from the atom types, mapped by `atoms.type_map` in `estk.yaml` or by
+    `--type-map 1=H,2=O,3=Ti`. The order of the elements on your `pair_coeff * * model H O Ti`
+    line gives types 1, 2, 3.
+  - Without a map, the dump's `element` column is used, but only if LAMMPS wrote real
+    elements there (`dump_modify <dump-id> element H O Ti`). Without that line LAMMPS writes C
+    for every atom, and estk stops and asks for the map.
 
 ## 7. Figures
 
