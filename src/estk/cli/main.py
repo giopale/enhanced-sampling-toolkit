@@ -909,6 +909,100 @@ def basins(
         console.print(f"wrote {written}")
 
 
+@app.command("average")
+@handle_errors
+def average(
+    quantities: Annotated[
+        list[str], typer.Argument(help="Quantities to average, e.g. the cn of each site.")
+    ],
+    group: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="A group of quantities for the chart, e.g. O2c=cnS1,cnS2 (repeat; "
+            "the bars follow the order of the groups)."
+        ),
+    ] = None,
+    label: Annotated[
+        list[str] | None, typer.Option(help="Name of a quantity on the chart, e.g. cnS1=S1.")
+    ] = None,
+    ylabel: Annotated[str, typer.Option(help="y-axis label of the chart.")] = "average",
+    source: Annotated[
+        list[str] | None,
+        typer.Option(help="File of a quantity not in COLVAR/CV-<name>, e.g. q=file (repeat)."),
+    ] = None,
+    time: Annotated[
+        tuple[float, float] | None,
+        typer.Option(help="Time window in ns, e.g. --time 1 inf (skip the first ns)."),
+    ] = None,
+    blocks: Annotated[
+        int, typer.Option(help="Time blocks per run: the error bar when there is one run.")
+    ] = 4,
+    combine: Annotated[str, typer.Option(help="equal (default) or probability.")] = "equal",
+    runs: Annotated[
+        bool, typer.Option("--runs/--no-runs", help="Draw each run's average as a dot.")
+    ] = True,
+    style: StyleOption = None,
+    output: OutputsOption = None,
+) -> None:
+    """Equilibrium (reweighted) average of each quantity over all frames, with its error, and
+    a bar chart; e.g. the occupation of each surface site from its coordination number."""
+    import matplotlib.pyplot as plt
+
+    from estk.analysis import ensemble_averages
+    from estk.plotting import labels_from_config, plot_averages, plot_style
+    from estk.plotting.core import use_agg
+    from estk.project import Project
+
+    config = load_config(_state["config"])
+    sources = {}
+    for item in source or []:
+        name, sep, value = item.partition("=")
+        if not sep or not name or not value:
+            raise EstError(f"--source: expected e.g. q=cv_analysis/CV-sites, got {item!r}")
+        sources[name] = value
+    groups: dict[str, list[str]] = {}
+    for item in group or []:
+        name, sep, members = item.partition("=")
+        listed = [m.strip() for m in members.split(",") if m.strip()]
+        if not sep or not name or not listed:
+            raise EstError(f"--group: expected e.g. O2c=cnS1,cnS2, got {item!r}")
+        groups[name] = listed
+    names = {}
+    for item in label or []:
+        name, sep, text = item.partition("=")
+        if not sep or not name:
+            raise EstError(f"--label: expected e.g. cnS1=S1, got {item!r}")
+        names[name] = text
+    wanted = list(dict.fromkeys([*quantities, *(q for m in groups.values() for q in m)]))
+    result = ensemble_averages(Project(config), wanted, sources=sources, time=time,
+                               blocks=blocks, combine=combine.lower())  # fmt: skip
+
+    table = Table("quantity", "group", "average", "error", *result.runs)
+    group_of = {q: g for g, members in groups.items() for q in members}
+    for q in result.quantities:
+        table.add_row(q, group_of.get(q, ""), f"{result.values[q]:.4g}",
+                      f"{result.errors[q]:.2g}" if np.isfinite(result.errors[q]) else "-",
+                      *[f"{result.runs[r][q]:.4g}" for r in result.runs])  # fmt: skip
+    console.print(table)
+    how = result.metadata["error"] or "no error bar (one run; use --blocks)"
+    console.print(f"reweighted over {result.metadata['frames']} frames; error: standard error "
+                  f"{how}", style="dim")  # fmt: skip
+
+    targets = output or [Path("averages.png")]
+    data_path = result.save(targets[0].with_suffix(".dat"))
+    _, style = _display(None, style)
+    use_agg()
+    with plot_style(style):
+        chart_labels = {**labels_from_config(config), **names}
+        ax = plot_averages(result, quantities=quantities, groups=groups or None,
+                           labels=chart_labels, ylabel=ylabel, runs=runs)  # fmt: skip
+        for target in targets:
+            ax.figure.savefig(target)
+            console.print(f"wrote {target}")
+        plt.close(ax.figure)
+    console.print(f"wrote {data_path}")
+
+
 structures_app = typer.Typer(
     help="Atomic configurations picked from the simulations.", no_args_is_help=True
 )

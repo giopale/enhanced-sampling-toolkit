@@ -464,6 +464,33 @@ total <covO2c> = 0.026 ± 0.003
   - `basins.png`: the surface with the basin boundaries and populations; draw a path on it
     with `--path`.
 
+### Equilibrium averages, e.g. site occupations
+
+`estk average` gives the reweighted average of any quantity over all frames: Σ wᵢ qᵢ / Σ wᵢ,
+with wᵢ = exp(Vᵢ/kT). For a site's coordination number, that's its equilibrium occupation.
+Compute one CV per site (e.g. a `COORDINATION` from each site's oxygen to the hydrogens, with
+`estk cv compute ... --save`), then:
+
+```bash
+estk average cnS1 cnS2 cnS3 cnS4 cnS5 cnS6 --time 1 inf \
+    --group O2c-up=cnS1,cnS2 --group O2c-down=cnS3,cnS4 --group O3c=cnS5 --group Obr=cnS6 \
+    --label cnS1=S1 --label cnS2=S2 --ylabel "protonated fraction" -o sites.png
+```
+
+- **Table.** The average and its error for each quantity, plus each run's own average.
+  - The error is the standard error between runs, or between `--blocks` time blocks with one
+    run.
+  - Frames where a quantity is NaN are skipped for that quantity only.
+- **Chart (`sites.png`).** One bar per quantity, with its error bar.
+  - The bars are coloured by `--group`, in the order given, with a gap between groups.
+  - Each run's value is drawn as a dot; `--no-runs` hides them.
+  - `--label` renames the bars.
+- **Data (`sites.dat`)** is reloaded with `estk.analysis.AverageResult.load`. To restyle the
+  chart, call `estk.plotting.plot_averages` on it.
+- **The ensemble** is the simulation with its walls: the OPES bias is reweighted away, the
+  walls are kept. All frames in the time window count, as in the "of all frames" column of
+  `estk basins`.
+
 ### Structures from the basins
 
 ```bash
