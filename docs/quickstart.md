@@ -496,7 +496,11 @@ estk average cnO2cA cnO2cB1 ... --select "d0 < 2.0"
     `and`/`or`/`not`, and `abs sqrt exp log sin cos tan min max`.
   - A CV name with `-` or `.` is written with `_` (`indirect_delta_B`, `dOOliq_min`), or
     `dOOliq.min` as is, or in braces (`{indirect-delta-B}`).
-  - A frame where a CV of the condition is undefined (NaN) is not selected.
+  - A frame where a CV of the condition is undefined (NaN) is not selected, not even through
+    `not`.
+  - To ask for undefined values, use `isnan(x)` or `defined(x)`. For example,
+    `--select "isnan(indirect_delta_B)"` keeps exactly the frames without a proton-transfer
+    chain.
 - **What the results mean.** Results are *conditional* on the selection: F_sel(x) =
   F(x) − kT ln P(selected | x), and averages over the selected frames. The selection is written
   into the files' headers (`estk.selection`).

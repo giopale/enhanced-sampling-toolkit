@@ -457,7 +457,12 @@ def _load_walker(
             in_window &= time_ps <= end * 1000.0
         report.outside_time = int(np.count_nonzero(keep & ~in_window))
         keep &= in_window
+    # columns loaded only for the selection keep their NaN: the condition decides about them
+    # (e.g. isnan(x) selects the frames where x is undefined)
+    only_selection = {n for n in hidden if select is not None and n in select.names}
     for name, values in columns.items():
+        if name in only_selection:
+            continue
         bad = keep & np.isnan(values)
         if bad.any():
             report.nan[name] = int(np.count_nonzero(bad))

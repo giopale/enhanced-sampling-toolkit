@@ -157,3 +157,33 @@ def test_commands(project, monkeypatch):
 
     out = runner.invoke(app, ["average", "s1", "--select", "d0 <"])
     assert out.exit_code == 1 and "can't parse" in out.output
+
+
+def test_undefined_values(tmp_path):
+    """isnan/defined select on undefined CVs (e.g. no proton-transfer chain); otherwise a
+    frame where a CV of the condition is undefined is never selected, not even by "not"."""
+    assert mask("isnan(d0)") == [False, False, False, False, True]
+    assert mask("defined(d0) and cn > 1.5") == [True, False, True, False, False]
+    assert mask("not d0 < 2.0") == [False, False, True, True, False]  # NaN: not selected
+    assert mask("isnan(d0) or d0 < 1.8") == [True, False, False, False, True]
+
+    write_tilted(tmp_path / "r0", 0, n=3000)
+    colvar = np.loadtxt(tmp_path / "r0" / "COLVAR", comments="#")
+    undefined = np.arange(len(colvar)) % 4 == 0  # a quarter of the frames
+    pt = np.where(undefined, np.nan, colvar[:, 1])
+    np.savetxt(tmp_path / "r0" / "CV-pt", np.column_stack([colvar[:, 0], pt]), fmt="%.8f",
+               header="FIELDS time pt", comments="#! ")  # fmt: skip
+    (tmp_path / "estk.yaml").write_text(CONFIG.format(pattern="r*"))
+    config = load_config(tmp_path / "estk.yaml")
+    config.select("isnan(pt)")
+    run = Project(config).runs[0]
+    table = run.load_cvs(["d0"])  # pt is loaded for the selection only, NaN kept
+    assert len(table) == np.count_nonzero(undefined)
+    config.select("defined(pt)")
+    assert len(run.load_cvs(["d0"])) == np.count_nonzero(~undefined)
+    config.select("not pt > 99")
+    assert len(run.load_cvs(["d0"])) == np.count_nonzero(~undefined)
+    config.select("isnan(pt)")
+    result = ensemble_averages(Project(config), ["d0"])
+    assert 0 < result.metadata["selected_share"][0] < 1
+    assert result.metadata["selected_frames"] == pytest.approx(0.25, abs=0.01)

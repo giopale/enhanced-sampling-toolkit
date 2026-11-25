@@ -3,13 +3,15 @@
 A selection is an expression such as ``(cn - 1.5) * indirect_delta_B < 0.05`` or
 ``1.8 < d0 < 2.3 and cn > 1.5``: numbers, CV names, ``+ - * / ^`` (or ``**``), comparisons (also
 chained), ``and``/``or``/``not``, parentheses, ``pi``, and the functions ``abs sqrt exp log sin
-cos tan min max``. A frame is selected where the expression is true (or non-zero).
+cos tan min max``, and ``isnan(x)`` / ``defined(x)`` (true where x is undefined, e.g. a
+proton-transfer CV without a chain, or defined). A frame is selected where the expression is
+true (or non-zero).
 
 CV names: as they are if they are Python-like names (``cn``, ``d0``), ``dOOliq.min`` as written,
 names with other characters with ``_`` in their place (``indirect-delta-B`` as
 ``indirect_delta_B``) or in braces (``{indirect-delta-B}``). The expression is parsed and
 checked against a whitelist; nothing else is evaluated. Frames where a CV in the expression
-is NaN are not selected.
+is NaN are not selected, unless the expression asks for them with ``isnan``.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from estk.errors import EstError
 _FUNCTIONS = {
     "abs": np.abs, "sqrt": np.sqrt, "exp": np.exp, "log": np.log, "sin": np.sin,
     "cos": np.cos, "tan": np.tan, "min": np.minimum, "max": np.maximum,
+    "isnan": np.isnan, "defined": np.isfinite,
 }  # fmt: skip
 _CONSTANTS = {"pi": np.pi}
 _BINARY = {
@@ -107,7 +110,18 @@ class Selection:
         if result.dtype != bool:
             result = np.nan_to_num(result.astype(float), nan=0.0) != 0
         n = len(next(iter(values.values()))) if values else 1
-        return np.broadcast_to(result, (n,)).copy()
+        result = np.broadcast_to(result, (n,)).copy()
+        if not self.asks_for_undefined:  # an undefined CV never selects a frame (not even
+            for v in values.values():  # through "not"), unless asked for with isnan/defined
+                result &= np.isfinite(v)
+        return result
+
+    @property
+    def asks_for_undefined(self) -> bool:
+        """Whether the expression tests for undefined values (``isnan`` or ``defined``)."""
+        return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                   and node.func.id in ("isnan", "defined")
+                   for node in ast.walk(self._tree))  # type: ignore[arg-type]  # fmt: skip
 
     def describe(self) -> str:
         return f"{self.label}: {self.text}" if self.label else self.text
