@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from estk.analysis.basins import NO_DATA, BasinDefinition, Region, define_basins
+from estk.analysis.basins import NO_DATA, BasinDefinition, Region, _in_region, define_basins
 from estk.errors import EstError
 from estk.io.lammpstrj import Frame, dump_columns, iter_frames, scan_steps
 from estk.io.plumed import walker_file
@@ -193,8 +193,18 @@ def sample_basins(
         if not available.any():
             log.warning("%s: no frame of the CV files is in the dump %s", run.name, dump)
         keep = inside & available
+        # the frames of each chosen basin; a named region takes every frame inside it, also
+        # those in a region listed before it (regions may overlap: e.g. a transition-state
+        # region within a larger one, which counts those frames for populations)
+        points = table.array(cvs)[keep]
+        members = {
+            name: _in_region(points, cvs, definition.regions[name])
+            if definition.regions is not None
+            else labels[keep] == definition.names.index(name)
+            for name in chosen
+        }  # fmt: skip
         pool.append({
-            "run": run.name, "labels": labels[keep], "logw": logw[keep] - log_total,
+            "run": run.name, "members": members, "logw": logw[keep] - log_total,
             "walker": walkers[keep], "step": steps[keep], "time": table.time[keep],
             "values": {c: np.asarray(table[c], dtype=float)[keep] for c in cvs + quantities},
         })  # fmt: skip
@@ -210,8 +220,7 @@ def sample_basins(
     frames: list[SampledFrame] = []
     candidates, effective = {}, {}
     for name in chosen:
-        k = definition.names.index(name)
-        rows = [(i, np.nonzero(p["labels"] == k)[0]) for i, p in enumerate(pool)]
+        rows = [(i, np.nonzero(p["members"][name])[0]) for i, p in enumerate(pool)]
         log_p = np.concatenate([
             (pool[i]["logw"][r] + run_share[i]) if mode == "boltzmann"
             else np.full(len(r), run_share[i] - math.log(max(len(r), 1)))

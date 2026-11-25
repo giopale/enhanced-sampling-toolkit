@@ -171,6 +171,31 @@ class BasinDefinition:
         return _frame_labels(points, self.grid, self.labels, self.regions)
 
 
+def _warn_shadowed(grid: Grid, regions: Mapping[str, Region], labels: np.ndarray) -> None:
+    """Warn about regions whose grid points all (or partly) belong to a region listed before
+    them: a frame in several regions counts for the first."""
+    coordinates = grid.coordinates()
+    flat = labels.reshape(-1)
+    names = list(regions)
+    for k, (name, region) in enumerate(regions.items()):
+        mine = _in_region(coordinates, list(grid.names), region)
+        if not mine.any():
+            continue
+        taken = mine & (flat != k)
+        if not taken.any():
+            continue
+        by = sorted({names[j] for j in flat[taken] if j >= 0})
+        share = taken.sum() / mine.sum()
+        if share == 1.0:
+            log.warning("basin region %s lies entirely within %s, listed before it: its frames "
+                        "count for %s (list %s first, or use it with estk structures, which "
+                        "takes every frame inside it)", name, ", ".join(by), ", ".join(by),
+                        name)  # fmt: skip
+        else:
+            log.warning("basin region %s overlaps %s, listed before it: %.0f %% of it counts "
+                        "for %s", name, ", ".join(by), 100 * share, ", ".join(by))  # fmt: skip
+
+
 def define_basins(
     project: Project,
     cvs: Sequence[str],
@@ -210,8 +235,10 @@ def define_basins(
         unknown = sorted({cv for r in regions.values() for cv in r} - set(cvs))
         if unknown:
             raise EstError(f"basin regions use {', '.join(unknown)}, not CVs of {tuple(cvs)}")
-        return BasinDefinition(list(regions), region_map(surface.grid, regions), surface.grid,
-                               kbt, "regions", dict(regions))  # fmt: skip
+        labels = region_map(surface.grid, regions)
+        _warn_shadowed(surface.grid, regions, labels)
+        return BasinDefinition(list(regions), labels, surface.grid, kbt, "regions",
+                               dict(regions))  # fmt: skip
     labels, minima = basin_map(surface, min_depth_kt * kbt)
     names = [str(k + 1) for k in range(len(minima))]
     return BasinDefinition(names, labels, surface.grid, kbt, "automatic")

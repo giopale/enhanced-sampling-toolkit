@@ -413,6 +413,12 @@ total <covO2c> = 0.026 ± 0.003
 
     Frames in no region are reported as "in no region".
 
+    - **Overlapping regions.** For populations, a frame inside several regions counts for the
+      first one listed, so each frame is counted once. estk warns when a region lies
+      (partly) inside one listed before it. `estk structures basins --basin NAME` takes every
+      frame inside NAME, whatever the order. So a small transition-state region inside a
+      larger basin region works for sampling structures.
+
     - **Several surfaces in one file.** You can list basins for different surfaces together.
       Each surface uses only the regions whose CVs are all its own: `d0 cn` ignores a region
       in `indirect-delta-B`, and vice versa.

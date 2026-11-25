@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
+from estk.analysis import basin_populations
 from estk.analysis.structures import key_name, sample_basins
 from estk.cli.main import app
 from estk.errors import EstError
@@ -177,3 +178,22 @@ def test_species(project, surface, tmp_path, monkeypatch):
     assert all(s == ["O", "H", "H"] for _, s, _ in read_extxyz(root / "structures-d0-cn.extxyz"))
     out = runner.invoke(app, [*args, "--type-map", "H,O"])
     assert out.exit_code == 1 and "--type-map" in out.output
+
+
+def test_region_inside_an_earlier_region(project, surface, tmp_path, caplog):
+    """A transition-state region inside a larger region listed before it: populations count
+    its frames for the larger one (with a warning), but sampling it takes them all."""
+    root = project.config.path.parent
+    text = (root / "estk.yaml").read_text().replace("runs:\n", f"runs:\n  root: {root}\n")
+    (tmp_path / "estk.yaml").write_text(
+        text + "basins:\n  left: {d0: [null, 2.0]}\n  ts: {d0: [1.9, 2.0], cn: [1.3, 1.6]}\n"
+    )
+    nested = Project(tmp_path / "estk.yaml")
+    result = basin_populations(nested, ["d0", "cn"], surface=surface)
+    assert result.basins[1].population == 0.0
+    assert any("ts lies entirely within left" in r.message for r in caplog.records)
+
+    sample = sample_basins(nested, ["d0", "cn"], surface, n=5, basins=["ts"])
+    assert sample.candidates["ts"] > 5 and len(sample.frames) == 5
+    for f in sample.frames:
+        assert 1.9 <= f.values["d0"] <= 2.0 and 1.3 <= f.values["cn"] <= 1.6
