@@ -170,25 +170,17 @@ class ProtonTransfer:
 
     def _oxygen_hydrogen(self, frame: Frame) -> tuple[np.ndarray, np.ndarray]:
         if self._elements is None:  # all atoms, sorted by id: the same rows in every frame
-            self._elements = oxygens_and_hydrogens(frame, self.type_map)
+            if self.type_map:
+                types = frame.columns["type"].astype(int)
+                unknown = sorted(set(types) - set(self.type_map))
+                if unknown:
+                    raise EstError(f"atom types {unknown} are not in atoms.type_map")
+                elements = np.array([self.type_map[t] for t in types])
+            else:
+                elements = frame.columns["element"]
+            oxygens = np.flatnonzero(elements == "O")
+            hydrogens = np.flatnonzero(elements == "H")
+            if not len(oxygens) or not len(hydrogens):
+                raise EstError("no O or no H atoms found; check atoms.type_map in estk.yaml")
+            self._elements = (oxygens, hydrogens)
         return self._elements
-
-
-def oxygens_and_hydrogens(
-    frame: Frame, type_map: Mapping[int, str]
-) -> tuple[np.ndarray, np.ndarray]:
-    """Rows of the O and H atoms of a frame of all atoms: from ``type_map`` (LAMMPS type ->
-    element) if given, else from the dump's ``element`` column."""
-    if type_map:
-        types = frame.columns["type"].astype(int)
-        unknown = sorted(set(types) - set(type_map))
-        if unknown:
-            raise EstError(f"atom types {unknown} are not in atoms.type_map")
-        elements = np.array([type_map[t] for t in types])
-    else:
-        elements = frame.columns["element"]
-    oxygens = np.flatnonzero(elements == "O")
-    hydrogens = np.flatnonzero(elements == "H")
-    if not len(oxygens) or not len(hydrogens):
-        raise EstError("no O or no H atoms found; check atoms.type_map in estk.yaml")
-    return oxygens, hydrogens
