@@ -380,6 +380,26 @@ estk cv proton-transfer --kind indirect --donor pt_type1 --acceptor site_A \
   ECToolkits sometimes uses the donor itself as the "bridge", by a numerical accident.
   `--ectoolkits-compat` reproduces that, to compare with old files.
 
+**Hydrogen bonds of one oxygen** with a set of partner oxygens, e.g. the target water's O
+with the liquid:
+
+```bash
+estk cv hbonds --center 262 --partners 153-216,252-261,263 --axis y --name liq --save -j 16
+```
+
+- **The criterion** is the one of the proton-transfer CVs. Each H belongs to its nearest O,
+  and donor O–H···acceptor O is a bond when O–O < `--distance` (3.5 Å) and the angle at the
+  donor between H and acceptor is ≤ `--angle` (30°).
+- **The CVs**, written to `cv_analysis/CV-hb-<name>`:
+  - `hb-n-<name>`: the number of bonds;
+  - `hb-doo-<name>`: the O–O distance of the shortest one;
+  - `hb-angle-<name>`: that bond's angle with `--axis` (0–180°), taking the O–O vector from
+    the center to the partner;
+  - `hb-role-<name>`: +1 if the center donates the proton, −1 if it accepts it.
+- `--direction donor|acceptor` keeps only the bonds where the center donates or accepts.
+- **Without any bond**, the number is 0 and the others are NaN.
+- `--partners` also takes a group of `atoms.groups` in `estk.yaml`.
+
 ### Basin populations
 
 How much of the equilibrium ensemble is in each basin, and the average of any quantity there:

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from estk.cv.builtin import CVProgram
+from estk.cv.hbonds import HBonds
 from estk.cv.proton_transfer import ProtonTransfer
 from estk.errors import EstError
 from estk.io.lammpstrj import Frame, iter_frames
@@ -30,9 +31,9 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
-Program = CVProgram | ProtonTransfer
+Program = CVProgram | ProtonTransfer | HBonds
 
-__all__ = ["CVProgram", "ComputedFile", "ProtonTransfer", "compute_cvs"]
+__all__ = ["CVProgram", "ComputedFile", "HBonds", "ProtonTransfer", "compute_cvs"]
 
 
 @dataclass
@@ -59,7 +60,7 @@ def compute_cvs(
     ``dump`` is the dump's name in the run folder; a walker's is found like its other files
     (``traj.3.lammpstrj`` or ``traj.lammpstrj.3``). ``every`` keeps every n-th frame.
     """
-    if isinstance(programs, (str, Path, CVProgram, ProtonTransfer)):
+    if isinstance(programs, (str, Path, CVProgram, ProtonTransfer, HBonds)):
         programs = [programs]
     programs = [CVProgram.from_plumed(p) if isinstance(p, (str, Path)) else p for p in programs]
     if every < 1:
