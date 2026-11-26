@@ -177,6 +177,43 @@ class ReactionConfig(_Section):
 ENERGY_UNITS = {"kj/mol": "kJ/mol", "kcal/mol": "kcal/mol", "ev": "eV", "kt": "kT"}
 
 
+class AnalysisConfig(_Section):
+    """Defaults of every analysis command; a command's ``--time`` or ``--points`` wins.
+
+    ``time``: the time window in ns, ``[start, end]`` (``null`` for an open end), e.g.
+    ``[2, null]`` to skip the first 2 ns (the OPES start-up transient). ``points``: grid points
+    per CV, one number for all CVs or one per CV.
+    """
+
+    time: tuple[float | None, float | None] | None = None
+    points: int | list[int] | None = None
+
+    @field_validator("time")
+    @classmethod
+    def _check_time(
+        cls, value: tuple[float | None, float | None] | None
+    ) -> tuple[float | None, float | None] | None:
+        if value is not None:
+            start, end = value
+            if start is not None and end is not None and not start < end:
+                raise ValueError(f"time [{start}, {end}]: the start must be before the end")
+        return value
+
+    @field_validator("points")
+    @classmethod
+    def _check_points(cls, value: int | list[int] | None) -> int | list[int] | None:
+        values = [value] if isinstance(value, int) else value or []
+        if any(v < 2 for v in values):
+            raise ValueError(f"points: at least 2 per CV, got {value}")
+        return value
+
+    def window(
+        self, time: tuple[float | None, float | None] | None
+    ) -> tuple[float | None, float | None] | None:
+        """``time`` if given, else the configured window."""
+        return time if time is not None else self.time
+
+
 class PlotConfig(_Section):
     """Default plot settings: the style and the energy units of figures and tables.
 
@@ -208,6 +245,7 @@ class ProjectConfig(_Section):
     atoms: AtomsConfig = Field(default_factory=AtomsConfig)
     reaction: ReactionConfig = Field(default_factory=ReactionConfig)
     plot: PlotConfig = Field(default_factory=PlotConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     # named regions for estk basins: {name: {cv: [lo, hi]}} (null for an open end)
     basins: dict[str, dict[str, tuple[float | None, float | None]]] = Field(default_factory=dict)
     # named frame selections for --select: {name: "condition on CVs"}

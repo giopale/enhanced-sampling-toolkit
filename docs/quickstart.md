@@ -133,6 +133,20 @@ estk config migrate to_refactor/config/case/atio2-h2o.yaml -o estk.yaml
 The migration keeps the facts about the system and lists the settings it left out, with
 where each now lives.
 
+**Defaults for every analysis.** The time window and the grid can be set once:
+
+```yaml
+analysis:
+  time: [2, null]      # ns: skip the OPES start-up transient; null = to the end
+  points: 300          # grid points per CV, or one per CV: [300, 200]
+```
+
+- **Where they apply:** `reweight`, `bandwidth`, `mep` surfaces, `along-path`, `basins`,
+  `average`, `structures` and `convergence`.
+- **`convergence time`** starts its windows at the configured start.
+- **A command's own `--time` or `--points`** overrides them for that command.
+- **Each output records the window it used** in its header (`estk.time_window_ns`).
+
 ## 4. Check the runs
 
 What was read from the simulation files:

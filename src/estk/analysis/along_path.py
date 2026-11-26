@@ -120,6 +120,7 @@ def averages_along_path(
     ``bandwidth_method`` > estk.yaml > Silverman). ``combine`` and ``blocks`` work as in
     ``estk.reweight.reweight``.
     """
+    time = project.config.analysis.window(time)
     if combine not in COMBINE_MODES:
         raise EstError(f"combine must be one of {', '.join(COMBINE_MODES)}, got '{combine}'")
     quantities = list(dict.fromkeys(quantities))

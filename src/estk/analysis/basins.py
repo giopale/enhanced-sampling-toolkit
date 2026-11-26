@@ -533,6 +533,7 @@ def basin_populations(
     combine:
         ``equal`` (default) or ``probability``, as for surfaces.
     """
+    time = project.config.analysis.window(time)
     cvs = list(cvs)
     if combine not in COMBINE_MODES or combine == "legacy":
         raise EstError(f"combine must be equal or probability, got '{combine}'")

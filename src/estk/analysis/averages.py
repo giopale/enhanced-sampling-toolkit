@@ -114,6 +114,7 @@ def ensemble_averages(
     between the quantities. ``means`` likewise adds their mean, e.g. the protonated fraction
     of several sites together.
     """
+    time = project.config.analysis.window(time)
     quantities = list(dict.fromkeys(quantities))
     if not quantities:
         raise EstError("no quantities to average")

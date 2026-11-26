@@ -148,6 +148,11 @@ def barrier_convergence(
     save_steps:
         Folder to write each step's combined surface and path to.
     """
+    window = project.config.analysis.window(time if parameter == "bandwidth" else None)
+    if parameter == "bandwidth":
+        time = window
+    elif start is None and window is not None:
+        start = window[0]  # a time scan starts where the configured window starts
     if parameter not in PARAMETERS:
         raise EstError(f"unknown parameter '{parameter}' (time or bandwidth)")
     if not values:

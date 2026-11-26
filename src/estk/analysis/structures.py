@@ -145,6 +145,7 @@ def sample_basins(
     walker's own) can be drawn. ``quantities`` (with ``sources`` for other files) are written
     to the headers next to the CVs.
     """
+    time = project.config.analysis.window(time)
     cvs = list(cvs)
     if mode not in MODES:
         raise EstError(f"mode must be one of {', '.join(MODES)}, got '{mode}'")

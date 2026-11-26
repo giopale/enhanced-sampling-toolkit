@@ -199,7 +199,7 @@ def reweight(
     quantity: str | None = None,
     source: str | Path | None = None,
     time: tuple[float | None, float | None] | None = None,
-    points: int | Sequence[int] = DEFAULT_POINTS,
+    points: int | Sequence[int] | None = None,
     limits: Mapping[str, Limits] | None = None,
     bandwidth: Mapping[str, float] | None = None,
     bandwidth_method: str | None = None,
@@ -222,7 +222,8 @@ def reweight(
     time:
         Time window ``(start, end)`` in ns.
     points:
-        Grid points per CV (one number for all CVs, or one per CV).
+        Grid points per CV (one number for all CVs, or one per CV); default:
+        ``analysis.points`` in estk.yaml, else 100.
     limits:
         ``{cv: (min, max)}`` overriding estk.yaml, the PLUMED walls and the data range.
     bandwidth:
@@ -249,6 +250,9 @@ def reweight(
         Log a warning when a bandwidth is smaller than the grid spacing of its CV (see
         ``coarse_grid_messages``).
     """
+    time = project.config.analysis.window(time)
+    if points is None:
+        points = project.config.analysis.points or DEFAULT_POINTS
     if blocks < 1:
         raise EstError(f"blocks must be at least 1, got {blocks}")
     cvs = list(cvs)
@@ -421,6 +425,7 @@ def estimate_bandwidths(
     "all" pools the frames of every run with their own weights ``exp(bias / kT)``, as the
     ``probability`` combination does. See ``BANDWIDTH_METHODS``.
     """
+    time = project.config.analysis.window(time)
     cvs = list(cvs)
     unknown = [m for m in methods if m not in BANDWIDTH_METHODS]
     if unknown or not methods:

@@ -233,8 +233,12 @@ def reweight(
         typer.Option(help="Time window in ns, e.g. --time 0 20 (use inf for no end)."),
     ] = None,
     points: Annotated[
-        str, typer.Option(help="Grid points: one number for all CVs, or one per CV (100,80).")
-    ] = "100",
+        str | None,
+        typer.Option(
+            help="Grid points, e.g. 300 or 300,200 (default: analysis.points in "
+            "estk.yaml, else 100)."
+        ),
+    ] = None,
     limits: Annotated[
         list[str] | None,
         typer.Option(help="Grid limits of a CV, e.g. --limits d0=1.5,2.5 or cn=0.75, (repeat)."),
@@ -803,8 +807,12 @@ def basins(
     ] = 4,
     combine: Annotated[str, typer.Option(help="equal (default) or probability.")] = "equal",
     points: Annotated[
-        str, typer.Option(help="Grid points when reweighting here (100 or 100,80).")
-    ] = "100",
+        str | None,
+        typer.Option(
+            help="Grid points, e.g. 300 or 300,200 (default: analysis.points in "
+            "estk.yaml, else 100)."
+        ),
+    ] = None,
     limits: Annotated[
         list[str] | None, typer.Option(help="Grid limits when reweighting, e.g. d0=1.5,2.5.")
     ] = None,
@@ -847,7 +855,7 @@ def basins(
     mode = combine.lower()
     if surface_file is not None:
         surface = Surface.load(surface_file)
-        if any([limits, bandwidth, points != "100"]):
+        if any([limits, bandwidth, points is not None]):
             err_console.print("[yellow]--points/--limits/--bandwidth ignored: the grid comes "
                               "from --surface[/yellow]")  # fmt: skip
     else:
@@ -1174,8 +1182,12 @@ def structures_basins(
         ),
     ] = None,
     points: Annotated[
-        str, typer.Option(help="Grid points when reweighting here (100 or 100,80).")
-    ] = "100",
+        str | None,
+        typer.Option(
+            help="Grid points, e.g. 300 or 300,200 (default: analysis.points in "
+            "estk.yaml, else 100)."
+        ),
+    ] = None,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", help="extxyz file (default: structures-<cvs>.extxyz)."),
@@ -1469,7 +1481,13 @@ def convergence_time(
     ] = None,
     path: _PATH = None,
     relax: _RELAX = False,
-    points: Annotated[str, typer.Option(help="Grid points (100 or 100,80).")] = "100",
+    points: Annotated[
+        str | None,
+        typer.Option(
+            help="Grid points, e.g. 300 or 300,200 (default: analysis.points in "
+            "estk.yaml, else 100)."
+        ),
+    ] = None,
     limits: Annotated[list[str] | None, typer.Option(help="Grid limits, e.g. d0=1.5,2.2.")] = None,
     bandwidth: Annotated[
         list[str] | None, typer.Option(help="Bandwidth, e.g. d0=0.02, or scv / silverman.")
@@ -1523,7 +1541,13 @@ def convergence_bandwidth(
     ] = None,
     path: _PATH = None,
     relax: _RELAX = False,
-    points: Annotated[str, typer.Option(help="Grid points (100 or 100,80).")] = "100",
+    points: Annotated[
+        str | None,
+        typer.Option(
+            help="Grid points, e.g. 300 or 300,200 (default: analysis.points in "
+            "estk.yaml, else 100)."
+        ),
+    ] = None,
     limits: Annotated[list[str] | None, typer.Option(help="Grid limits, e.g. d0=1.5,2.2.")] = None,
     bandwidth: Annotated[
         list[str] | None, typer.Option(help="Bandwidth of the other CVs, e.g. cn=0.03.")
@@ -1847,7 +1871,9 @@ def _combine_mode(text: str) -> str | None:
     return text.lower()
 
 
-def _parse_points(text: str) -> int | list[int]:
+def _parse_points(text: str | None) -> int | list[int] | None:
+    if text is None:
+        return None  # analysis.points in estk.yaml, else 100
     try:
         values = [int(v) for v in text.split(",")]
     except ValueError:
