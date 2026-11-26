@@ -35,7 +35,14 @@ import numpy as np
 
 from estk.errors import EstError, MissingFileError
 from estk.grid import Grid
-from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
+from estk.io.textfile import (
+    PREFIX,
+    decode,
+    metadata_lines,
+    open_text,
+    read_header,
+    write_text_atomic,
+)
 from estk.logging import get_logger
 from estk.reweight.combine import MODES as COMBINE_MODES
 from estk.reweight.core import logsumexp
@@ -344,7 +351,7 @@ class BasinResult:
             values += [b.run_populations.get(r, math.nan) for r in runs]
             lines.append(" ".join([b.name.replace(" ", "_"), *(f"{v:.10g}" for v in values)]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n")
+        write_text_atomic(path, "\n".join(lines) + "\n")
         return path
 
     @classmethod

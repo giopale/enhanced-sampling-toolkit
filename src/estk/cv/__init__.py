@@ -23,6 +23,7 @@ from estk.cv.proton_transfer import ProtonTransfer
 from estk.errors import EstError
 from estk.io.lammpstrj import Frame, iter_frames
 from estk.io.plumed import walker_file
+from estk.io.textfile import write_atomic
 from estk.logging import get_logger
 
 if TYPE_CHECKING:
@@ -130,9 +131,9 @@ def _compute(
     for p, output in zip(prints, outputs, strict=True):
         keep = np.arange(len(table)) % p.stride == 0
         index = [0] + [1 + names.index(a) for a in p.args]
-        output.parent.mkdir(parents=True, exist_ok=True)
-        np.savetxt(output, table[keep][:, index], fmt="%.10g",
-                   header=f"FIELDS time {' '.join(p.args)}", comments="#! ")  # fmt: skip
+        with write_atomic(output) as f:
+            np.savetxt(f, table[keep][:, index], fmt="%.10g",
+                       header=f"FIELDS time {' '.join(p.args)}", comments="#! ")  # fmt: skip
     log.info("%s: %d frames, steps %d to %d", source.name, len(rows), steps[0], steps[-1])
     return len(rows), steps[0], steps[-1]
 

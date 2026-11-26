@@ -11,7 +11,13 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 from estk.errors import EstError
-from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
+from estk.io.textfile import (
+    PREFIX,
+    decode,
+    metadata_lines,
+    read_header,
+    write_atomic,
+)
 from estk.logging import get_logger
 from estk.paths.minima import Minimum, find_minima
 from estk.paths.string import evolve_string, initial_string
@@ -89,7 +95,7 @@ class MinimumEnergyPath:
         }
         header = [f"#! FIELDS {' '.join(fields)}", *metadata_lines(meta)]
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open_text(path, "w") as f:
+        with write_atomic(path) as f:
             f.write("\n".join(header) + "\n")
             np.savetxt(f, np.column_stack(columns), fmt="%.10g")
         return path

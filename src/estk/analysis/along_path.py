@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from estk.errors import EstError
-from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
+from estk.io.textfile import (
+    PREFIX,
+    decode,
+    metadata_lines,
+    read_header,
+    write_atomic,
+)
 from estk.logging import get_logger
 from estk.reweight.core import _split_blocks, choose_bandwidths, log_weights, logsumexp
 from estk.reweight.kde import kde_at_points
@@ -68,7 +74,7 @@ class AlongPathResult:
         meta = {"units": self.units, "path_cvs": list(self.names), "quantities": self.quantities,
                 "runs": list(self.runs), **self.metadata}  # fmt: skip
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open_text(path, "w") as f:
+        with write_atomic(path) as f:
             f.write("\n".join([f"#! FIELDS {' '.join(fields)}", *metadata_lines(meta)]) + "\n")
             np.savetxt(f, np.column_stack(columns), fmt="%.10g")
         return path

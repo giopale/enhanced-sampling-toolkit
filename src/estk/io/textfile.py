@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import shlex
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any
 
@@ -42,6 +44,29 @@ def open_text(path: Path, mode: str = "r") -> IO[str]:
     if path.suffix == ".gz":
         return gzip.open(path, mode + "t")  # type: ignore[return-value]
     return open(path, mode, errors="replace" if mode == "r" else "strict")
+
+
+@contextmanager
+def write_atomic(path: Path | str) -> Iterator[IO[str]]:
+    """Write a text file (gzip for ``.gz``) under a temporary name next to it, then rename it
+    into place: readers never see a half-written file, and two processes writing the same file
+    at once cannot mix their lines (the last one to finish wins)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{os.getpid()}.{path.name}")  # same suffix: same compression
+    try:
+        with open_text(temporary, "w") as f:
+            yield f
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_text_atomic(path: Path | str, text: str) -> Path:
+    """``path.write_text(text)``, atomically (see ``write_atomic``)."""
+    with write_atomic(path) as f:
+        f.write(text)
+    return Path(path)
 
 
 def base_name(path: Path) -> str:

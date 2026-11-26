@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from estk.errors import EstError, MissingFileError
-from estk.io.textfile import PREFIX, decode, metadata_lines, read_header
+from estk.io.textfile import PREFIX, decode, metadata_lines, read_header, write_text_atomic
 from estk.reweight.core import logsumexp
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ class AverageResult:
             values = [self.values[q], self.errors[q], *[self.runs[r][q] for r in runs]]
             lines.append(" ".join([q, *(f"{v:.10g}" for v in values)]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n")
+        write_text_atomic(path, "\n".join(lines) + "\n")
         return path
 
     @classmethod

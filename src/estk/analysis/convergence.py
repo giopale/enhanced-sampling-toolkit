@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from estk.errors import EstError, MissingFileError
+from estk.io.textfile import write_text_atomic
 from estk.logging import get_logger
 from estk.paths import MinimumEnergyPath, evaluate, minimum_energy_path
 
@@ -73,7 +74,7 @@ class ConvergenceResult:
             values += [r.run_barriers.get(k, float("nan")) for k in runs]
             lines.append(" ".join(f"{v:.10g}" for v in values))
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines) + "\n")
+        write_text_atomic(path, "\n".join(lines) + "\n")
         return path
 
     @classmethod

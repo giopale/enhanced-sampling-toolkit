@@ -27,7 +27,14 @@ import numpy as np
 
 from estk.errors import EstError
 from estk.grid import Grid
-from estk.io.textfile import PREFIX, decode, metadata_lines, open_text, read_header
+from estk.io.textfile import (
+    PREFIX,
+    decode,
+    metadata_lines,
+    open_text,
+    read_header,
+    write_atomic,
+)
 from estk.surface import Surface
 
 
@@ -57,9 +64,8 @@ def write_surface(surface: Surface, path: Path) -> Path:
         columns.append(np.asarray(surface.fes).reshape(-1, order="F"))
     data = np.column_stack(columns)
 
-    path.parent.mkdir(parents=True, exist_ok=True)
     sweep = grid.points[0]
-    with open_text(path, "w") as f:
+    with write_atomic(path) as f:
         f.write("\n".join(header) + "\n")
         for start in range(0, len(data), sweep):
             np.savetxt(f, data[start : start + sweep], fmt="%.10g")
@@ -75,7 +81,7 @@ def read_surface(path: Path) -> Surface:
         :2
     ]
     ndim = len(names)
-    data = np.loadtxt(path, comments="#", ndmin=2)
+    data = _load_columns(path, len(fields))
     if data.shape[1] < ndim + 1:
         raise EstError(f"{path}: expected at least {ndim + 1} columns")
 
@@ -180,3 +186,22 @@ def _snap(path: Path, name: str, values: np.ndarray, axis: np.ndarray) -> np.nda
                        f"of the grid in the header ({axis[0]:g} to {axis[-1]:g}, {len(axis)} "
                        "points); the file may be damaged: write it again")  # fmt: skip
     return index
+
+
+def _load_columns(path: Path, expected: int) -> np.ndarray:
+    """The numbers of a grid file; a line with a wrong number of columns is reported by its
+    line number (a damaged file, e.g. written by two processes at once)."""
+    try:
+        return np.loadtxt(path, comments="#", ndmin=2)
+    except ValueError:
+        pass
+    with open_text(path) as f:
+        for number, line in enumerate(f, start=1):
+            words = line.split()
+            if words and not line.startswith("#") and len(words) != expected:
+                raise EstError(
+                    f"{path}: line {number} has {len(words)} column(s) instead of {expected} "
+                    f"({line.strip()[:60]!r}); the file is damaged, probably written by two "
+                    "estk processes at once: write it again"
+                ) from None
+    raise EstError(f"{path}: not a grid of numbers")

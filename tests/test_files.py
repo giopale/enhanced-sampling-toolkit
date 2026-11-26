@@ -10,7 +10,7 @@ import estk
 from estk.cli.main import app
 from estk.errors import EstError
 from estk.grid import Grid
-from estk.io.textfile import base_name, set_command
+from estk.io.textfile import base_name, set_command, write_atomic
 from estk.paths import MinimumEnergyPath, minimum_energy_path
 from estk.surface import Surface
 
@@ -152,3 +152,26 @@ def test_grid_read_from_the_header(tmp_path):
     (tmp_path / "twice.dat").write_text("\n".join(twice) + "\n")
     with pytest.raises(EstError, match="more than once"):
         Surface.load(tmp_path / "twice.dat")
+
+
+def test_atomic_writes_and_damaged_files(tmp_path):
+    """Files are written under a temporary name and renamed: no partial or mixed files are
+    left; a file with a broken line is reported by its line number."""
+    target = tmp_path / "x.dat"
+    target.write_text("old\n")
+    with pytest.raises(RuntimeError):
+        with write_atomic(target) as f:
+            f.write("half")
+            raise RuntimeError("interrupted")
+    assert target.read_text() == "old\n"  # the old file is untouched
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["x.dat"]  # no temporary left
+    with write_atomic(tmp_path / "y.dat.gz") as f:
+        f.write("1 2\n")
+    assert gzip.open(tmp_path / "y.dat.gz", "rt").read() == "1 2\n"
+
+    grid = Grid(("x", "y"), (0.0, 0.0), (1.0, 1.0), (5, 4))
+    path = Surface(grid, np.zeros(grid.shape)).save(tmp_path / "s.dat")
+    lines = path.read_text().splitlines()
+    (tmp_path / "bad.dat").write_text("\n".join([*lines, "3.499764899"]) + "\n")
+    with pytest.raises(EstError, match=r"line \d+ has 1 column\(s\) instead of 3"):
+        Surface.load(tmp_path / "bad.dat")
