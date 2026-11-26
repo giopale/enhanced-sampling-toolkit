@@ -122,3 +122,33 @@ def test_compressed_reweight_mep_and_info(project_root, monkeypatch):
 
     result = runner.invoke(app, ["info", "missing.dat"])
     assert result.exit_code == 1
+
+
+def test_grid_read_from_the_header(tmp_path):
+    """estk's grid files are read on the grid of their header: printing noise in the
+    coordinates does not matter, a damaged line is named."""
+    grid = Grid(("d0", "cn"), (1.5, 0.7), (2.5, 2.2), (300, 300))
+    values = np.random.default_rng(0).random(grid.shape)
+    path = Surface(grid, values, metadata={"kbt": 2.9}).save(tmp_path / "s.dat")
+    lines = path.read_text().splitlines()
+    first = next(i for i, line in enumerate(lines) if line and not line.startswith("#"))
+
+    noisy = list(lines)
+    x, *rest = noisy[first + 7].split()
+    noisy[first + 7] = " ".join([repr(float(x) * (1 + 1e-12)), *rest])  # last-digit noise
+    (tmp_path / "noisy.dat").write_text("\n".join(noisy) + "\n")
+    back = Surface.load(tmp_path / "noisy.dat")
+    assert back.grid == grid
+    np.testing.assert_allclose(back.values, values, rtol=1e-9)
+
+    damaged = list(lines)
+    x, *rest = damaged[first + 7].split()
+    damaged[first + 7] = " ".join([str(float(x) + 0.0011), *rest])  # off the grid
+    (tmp_path / "damaged.dat").write_text("\n".join(damaged) + "\n")
+    with pytest.raises(EstError, match="grid line 8 is not a point of the grid"):
+        Surface.load(tmp_path / "damaged.dat")
+
+    twice = [*lines, lines[first]]  # one line written twice, as by an interrupted rewrite
+    (tmp_path / "twice.dat").write_text("\n".join(twice) + "\n")
+    with pytest.raises(EstError, match="more than once"):
+        Surface.load(tmp_path / "twice.dat")

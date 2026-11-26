@@ -79,19 +79,34 @@ def read_surface(path: Path) -> Surface:
     if data.shape[1] < ndim + 1:
         raise EstError(f"{path}: expected at least {ndim + 1} columns")
 
-    axes = [np.unique(data[:, d]) for d in range(ndim)]
+    declared_axes = _declared_axes(names, sets)
+    if declared_axes is not None:  # estk's files: the grid is in the header
+        axes = declared_axes
+        index = tuple(_snap(path, name, data[:, d], axes[d]) for d, name in enumerate(names))
+    else:  # other files: the grid from the values in the columns
+        axes = [np.unique(data[:, d]) for d in range(ndim)]
+        for name, a in zip(names, axes, strict=True):
+            declared = sets.get(f"num_grid_points_{name}") or sets.get(f"nbins_{name}")
+            if declared is not None and int(float(declared)) != len(a):
+                raise EstError(f"{path}: {name} has {len(a)} distinct values, header says "
+                               f"{declared}")  # fmt: skip
+        index = tuple(np.searchsorted(axes[d], data[:, d]) for d in range(ndim))
     points = tuple(len(a) for a in axes)
-    for name, n in zip(names, points, strict=True):
-        declared = sets.get(f"num_grid_points_{name}") or sets.get(f"nbins_{name}")
-        if declared is not None and int(float(declared)) != n:
-            raise EstError(f"{path}: {name} has {n} distinct values, header says {declared}")
+    flat = np.ravel_multi_index(index, points)
+    if len(np.unique(flat)) != len(flat):
+        row = int(np.flatnonzero(np.bincount(flat) > 1)[0])
+        raise EstError(f"{path}: grid point {np.unravel_index(row, points)} appears more than "
+                       "once; the file may be damaged: write it again")  # fmt: skip
+    if len(data) != int(np.prod(points)):
+        raise EstError(
+            f"{path}: {len(data)} grid lines for a grid of {' x '.join(map(str, points))}"
+        )
     grid = Grid(
         names=tuple(names),
         lower=tuple(float(a[0]) for a in axes),
         upper=tuple(float(a[-1]) for a in axes),
         points=points,
     )
-    index = tuple(np.searchsorted(axes[d], data[:, d]) for d in range(ndim))
     quantity = fields[ndim] if len(fields) > ndim else "value"
     fill = np.inf if quantity == "fes" else np.nan
     values = np.full(points, fill)
@@ -134,3 +149,34 @@ def _number_or_text(raw: str) -> Any:
         return float(raw)
     except ValueError:
         return raw
+
+
+def _declared_axes(names: list[str], sets: dict[str, str]) -> list[np.ndarray] | None:
+    """The axes from ``min_<cv>``, ``max_<cv>`` and ``num_grid_points_<cv>`` (estk's header:
+    both ends are grid points), or None if the header does not give all of them."""
+    axes = []
+    for name in names:
+        keys = (f"min_{name}", f"max_{name}", f"num_grid_points_{name}")
+        if not all(k in sets for k in keys):
+            return None
+        try:
+            lo, hi, n = float(sets[keys[0]]), float(sets[keys[1]]), int(float(sets[keys[2]]))
+        except ValueError:
+            return None
+        axes.append(np.linspace(lo, hi, n))
+    return axes
+
+
+def _snap(path: Path, name: str, values: np.ndarray, axis: np.ndarray) -> np.ndarray:
+    """Index of each value on ``axis``; an error naming the first value that is not on it."""
+    step = (axis[-1] - axis[0]) / (len(axis) - 1)
+    index = np.rint((values - axis[0]) / step).astype(int)
+    inside = (index >= 0) & (index < len(axis))
+    off = ~inside
+    off[inside] = np.abs(values[inside] - axis[index[inside]]) > 1e-3 * step
+    if off.any():
+        row = int(np.flatnonzero(off)[0])
+        raise EstError(f"{path}: {name} = {values[row]!r} on grid line {row + 1} is not a point "
+                       f"of the grid in the header ({axis[0]:g} to {axis[-1]:g}, {len(axis)} "
+                       "points); the file may be damaged: write it again")  # fmt: skip
+    return index
