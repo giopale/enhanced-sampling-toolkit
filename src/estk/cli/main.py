@@ -43,7 +43,7 @@ err_console = Console(stderr=True)
 log = get_logger(__name__)
 
 # Options given before the subcommand (estk -v --config x.yaml ...).
-_state: dict[str, Any] = {"verbosity": 0, "config": None, "select": None}
+_state: dict[str, Any] = {"verbosity": 0, "config": None, "select": None, "show": False}
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -78,12 +78,21 @@ def main(
         Path | None,
         typer.Option("--config", "-c", help=f"Project file (default: nearest {CONFIG_FILENAME})."),
     ] = None,
+    show: Annotated[
+        bool,
+        typer.Option(
+            "--show",
+            help="Also show the figures in the terminal (imgcat / iTerm2 inline images); may be "
+            "written anywhere on the command line.",
+        ),
+    ] = False,
     version: Annotated[
         bool,
         typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version."),
     ] = False,
 ) -> None:
     _state["verbosity"] = 1 if verbose else -1 if quiet else 0
+    _state["show"] = show
     _state["config"] = config
     _state["select"] = None  # set by the commands that take --select
     setup_cli_logging(_state["verbosity"])
@@ -753,6 +762,7 @@ def along_path(
         for target in targets:
             fig.savefig(target)
             console.print(f"wrote {target}")
+        _shown(fig)
         plt.close(fig)
     console.print(f"wrote {data_path}")
 
@@ -945,6 +955,7 @@ def basins(
                          labels=labels_from_config(config))  # fmt: skip
         target = folder / "basins.png"
         ax.figure.savefig(target)
+        _shown(ax.figure)
         plt.close(ax.figure)
     for written in (data_path, map_path, target):
         console.print(f"wrote {written}")
@@ -1098,6 +1109,7 @@ def average(
         for target in targets:
             ax.figure.savefig(target)
             console.print(f"wrote {target}")
+        _shown(ax.figure)
         plt.close(ax.figure)
     console.print(f"wrote {data_path}")
 
@@ -1302,6 +1314,7 @@ def plot_surface_command(
             )  # fmt: skip
         for target in targets:
             fig.savefig(target)
+        _shown(fig)
         plt.close(fig)
     console.print(f"wrote {', '.join(str(t) for t in targets)}")
 
@@ -1336,6 +1349,7 @@ def plot_path_command(
         ax = plot_path_profile(mep_path, units=units, runs=runs, annotate=annotate)
         for target in targets:
             ax.figure.savefig(target)
+        _shown(ax.figure)
         plt.close(ax.figure)
     console.print(f"wrote {', '.join(str(t) for t in targets)}")
 
@@ -1419,6 +1433,7 @@ def _convergence(
         ax = plot_convergence(result, units=units)
         ax.figure.savefig(folder / "convergence.png")
         ax.figure.savefig(folder / "convergence.pdf")
+        _shown(ax.figure)
         plt.close(ax.figure)
 
     from estk.plotting.core import energy_scale
@@ -1688,11 +1703,20 @@ check_app = typer.Typer(help="Checks of the simulations.", no_args_is_help=True)
 app.add_typer(check_app, name="check")
 
 
+def _shown(fig: object) -> None:
+    """Show the figure in the terminal with --show."""
+    if _state.get("show"):
+        from estk.cli.show import show_figure
+
+        show_figure(fig)
+
+
 def _save_figure(fig: object, targets: list[Path]) -> None:
     import matplotlib.pyplot as plt
 
     for target in targets:
         fig.savefig(target)  # type: ignore[attr-defined]
+    _shown(fig)
     plt.close(fig)  # type: ignore[arg-type]
     console.print(f"wrote {', '.join(str(t) for t in targets)}")
 
@@ -1937,3 +1961,11 @@ def config_migrate(
         err_console.print(f"\n[yellow]not migrated ({len(dropped)}):[/yellow]")
         for item in dropped:
             err_console.print(f"  {item}", highlight=False, markup=False)
+
+
+def run() -> None:
+    """The ``estk`` command: ``app``, with ``--show`` accepted anywhere on the command line."""
+    from estk.cli.show import move_show_first
+
+    sys.argv = move_show_first(sys.argv)
+    app()

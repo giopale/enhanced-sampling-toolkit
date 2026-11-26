@@ -594,6 +594,15 @@ estk plot path reweight-d0-cn/combined.mep.dat
 estk plot surface reweight-d0-cn/0*.dat -o runs.png    # all runs side by side
 ```
 
+**`--show`** also shows the figures in the terminal, for any command that draws one (`plot`,
+`along-path`, `basins`, `average`, `convergence`, `check`). It can go anywhere on the command
+line: `estk plot surface combined.dat --show`.
+- **How it's shown.** estk runs `imgcat` if one is on your PATH. Otherwise it writes the
+  inline-image escape sequence itself, which iTerm2, WezTerm and others display.
+- **Another viewer:** set `ESTK_IMGCAT`, e.g. `export ESTK_IMGCAT="kitten icat"` for kitty.
+- **Inside tmux** the image passes through only with `set -g allow-passthrough on`.
+- **When the output isn't a terminal,** e.g. redirected to a file, nothing is shown.
+
 ![Free-energy surface with the minimum energy path](images/surface.png)
 
 On the path, the open circle is the start, the filled one the end and the cross the highest

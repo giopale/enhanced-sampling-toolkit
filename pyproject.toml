@@ -22,7 +22,7 @@ dependencies = [
 dev = ["pytest", "ruff"]
 
 [project.scripts]
-estk = "estk.cli.main:app"
+estk = "estk.cli.main:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
