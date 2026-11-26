@@ -83,7 +83,7 @@ class Selection:
         """Map ``_``-names to the CVs they stand for (``indirect_delta_B`` ->
         ``indirect-delta-B``) when that CV is in ``available`` and the name itself is not."""
         by_key: dict[str, list[str]] = {}
-        for name in available:
+        for name in dict.fromkeys(available):  # each name once (it may be listed twice)
             by_key.setdefault(_key(name), []).append(name)
         for var, name in self._variables.items():
             if name in available or name not in by_key:

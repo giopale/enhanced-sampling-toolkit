@@ -53,6 +53,9 @@ def test_expressions():
             Selection.parse(bad)
     with pytest.raises(EstError, match="could be any of"):
         Selection.parse("a_b > 0").resolve(["a-b", "a.b"])
+    # a name listed twice (in estk.yaml and among the CVs of the command) is still one name
+    twice = Selection.parse("a_b > 0").resolve(["a-b", "cn", "a-b"])
+    assert twice.names == ["a-b"]
     with pytest.raises(EstError, match="not loaded"):
         Selection.parse("theta > 0").mask(COLUMNS)
     named = selection_from("near", {"near": "d0 < 2"})
