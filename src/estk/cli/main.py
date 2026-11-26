@@ -1477,7 +1477,11 @@ def convergence_time(
     until: Annotated[float, typer.Option(help="End of the last time window, in ns.")],
     step: Annotated[float, typer.Option(help="Spacing of the window ends, in ns.")] = 1.0,
     start: Annotated[
-        float | None, typer.Option(help="Start of every window, in ns (drop equilibration).")
+        float | None,
+        typer.Option(
+            help="Start of every window, in ns (drop equilibration; default: the start "
+            "of analysis.time in estk.yaml, else 0)."
+        ),
     ] = None,
     path: _PATH = None,
     relax: _RELAX = False,
@@ -1511,6 +1515,9 @@ def convergence_time(
     _state["select"] = select
     if step <= 0 or until <= 0:
         raise EstError("--until and --step must be positive")
+    if start is None:  # the start of analysis.time in estk.yaml, if set
+        window = load_config(_state["config"]).analysis.time
+        start = window[0] if window is not None else None
     first = (start or 0.0) + step
     values = list(np.arange(first, until + step / 2, step))
     if not values:

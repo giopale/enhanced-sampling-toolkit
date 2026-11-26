@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from estk.analysis import barrier_convergence, basin_populations, ensemble_averages
+from estk.analysis import (
+    ConvergenceResult,
+    barrier_convergence,
+    basin_populations,
+    ensemble_averages,
+)
 from estk.cli.main import app
 from estk.config import load_config
 from estk.errors import ConfigError
@@ -75,3 +80,13 @@ def test_command_options_win(root, monkeypatch):
                               "-o", "rw2"])  # fmt: skip
     assert out.exit_code == 0, out.output
     assert "21 points" in out.output and "31 points" not in out.output
+
+
+def test_time_scan_command_starts_at_the_configured_start(root, monkeypatch):
+    monkeypatch.chdir(root)
+    out = CliRunner().invoke(app, ["convergence", "time", "d0", "cn", "--until", "0.2",
+                                   "--step", "0.05", "-o", "scan"])  # fmt: skip
+    assert out.exit_code == 0, out.output
+    result = ConvergenceResult.load(root / "scan" / "convergence.dat")
+    assert result.column("value").tolist() == pytest.approx([0.15, 0.2])  # windows from 0.1 ns
+    assert result.metadata["start_ns"] == 0.1
