@@ -385,7 +385,7 @@ def _load_walker(
 
     # Read the other files and join them on time.
     other_tables: dict[Path, Table] = {}
-    for path in {p for p in wanted.values() if p is not None}:
+    for path in sorted({p for p in wanted.values() if p is not None}):  # a fixed order
         try:
             other_tables[path] = read_table(path)
         except MissingFileError:
@@ -399,6 +399,8 @@ def _load_walker(
             raise
 
     selection = np.arange(len(keys))  # rows of the (deduplicated) COLVAR still kept
+    previous = selection
+    time_ps_all = colvar.column("time") * time_factor
     joined: dict[Path, np.ndarray] = {}  # file -> its row for each kept COLVAR row
     for path, table in other_tables.items():
         t = _file_time_ps(table, run)
@@ -414,7 +416,16 @@ def _load_walker(
         selection = selection[i_colvar]
         joined[path] = torder[i_table]
         if len(selection) == 0:
-            raise EstError(f"{path}: no times in common with {colvar.path.name}")
+            before = [p.name for p in joined if p != path]
+            others = f"{colvar.path.name} and {', '.join(before)}" if before else colvar.path.name
+            kept = time_ps_all[order][previous]  # the rows kept before this file
+            raise EstError(
+                f"{path}: no times in common with {others}. Times in {path.name}: "
+                f"{_describe_times(t)}; in {others}: {_describe_times(kept)}. Were the CV files "
+                "computed from different dumps, with different --every, or one with plumed "
+                "driver (which counts frames instead of using the steps)?"
+            )
+        previous = selection
 
     rows = order[selection]
     for name, path in wanted.items():
@@ -553,3 +564,13 @@ def _column_in(table: Table, name: str) -> str:
         f"{table.path}: no column '{name}' and more than one data column "
         f"({', '.join(data_columns)}); name the column '{name}'"
     )
+
+
+def _describe_times(time_ps: np.ndarray) -> str:
+    """``0 to 4000 ps, every 0.5 ps`` (for error messages)."""
+    if not len(time_ps):
+        return "none"
+    t = np.sort(np.asarray(time_ps, dtype=float))
+    steps = np.diff(t)
+    every = f", every {np.median(steps):.6g} ps" if len(steps) else ""
+    return f"{t[0]:.6g} to {t[-1]:.6g} ps ({len(t)} rows{every})"

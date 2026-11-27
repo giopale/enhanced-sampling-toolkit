@@ -190,3 +190,21 @@ def test_undefined_values(tmp_path):
     result = ensemble_averages(Project(config), ["d0"])
     assert 0 < result.metadata["selected_share"][0] < 1
     assert result.metadata["selected_frames"] == pytest.approx(0.25, abs=0.01)
+
+
+def test_cv_files_without_common_times(tmp_path):
+    """Two CV files of a run with no frame in common: the error says what times each has."""
+    write_tilted(tmp_path / "r0", 0, n=400)
+    t = np.arange(400) * 0.05  # ps, as COLVAR
+    np.savetxt(tmp_path / "r0" / "CV-a", np.column_stack([t[::2], t[::2]]), fmt="%.6f",
+               header="FIELDS time a", comments="#! ")  # fmt: skip
+    np.savetxt(tmp_path / "r0" / "CV-b", np.column_stack([t[1::2], t[1::2]]), fmt="%.6f",
+               header="FIELDS time b", comments="#! ")  # fmt: skip
+    (tmp_path / "estk.yaml").write_text(CONFIG.format(pattern="r*"))
+    run = Project(tmp_path / "estk.yaml").runs[0]
+    with pytest.raises(EstError) as error:
+        run.load_cvs(["a", "b"])
+    message = str(error.value)
+    assert "CV-b: no times in common with COLVAR and CV-a" in message
+    assert "Times in CV-b: 0.05 to 19.95 ps (200 rows, every 0.1 ps)" in message
+    assert "in COLVAR and CV-a: 0 to 19.9 ps (200 rows, every 0.1 ps)" in message
